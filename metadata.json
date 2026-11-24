@@ -1,0 +1,10 @@
+{
+  "name": "Remix Evaluo Studio nov 2026",
+  "description": "Asistente inteligente para transformar rúbricas y observaciones en informes pedagógicos narrativos y empáticos para las familias.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

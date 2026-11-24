@@ -1,0 +1,211 @@
+
+<!DOCTYPE html>
+<html lang="ca">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Evaluo Studio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;700;800&family=Merriweather:ital,wght@0,300;0,400;0,700;1,300&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Outfit', 'sans-serif'],
+              serif: ['Merriweather', 'serif'],
+            },
+            colors: {
+              primary: {
+                50: '#f8fafc',
+                100: '#f1f5f9',
+                200: '#e2e8f0', 
+                300: '#cbd5e1',
+                400: '#94a3b8',
+                500: '#64748b',
+                600: '#475569',
+                700: '#334155',
+                800: '#1e293b',
+                900: '#0f172a', 
+                950: '#020617',
+              },
+              warm: {
+                50: '#fdfcf7', 
+                100: '#f7f3ed', 
+                200: '#ece5d8', 
+                300: '#dfd2bc', 
+                400: '#cbb89a', 
+                500: '#b49977', 
+                600: '#9b7b5c',
+              }
+            },
+            animation: {
+              'fade-in': 'fadeIn 0.3s ease-out',
+              'slide-up': 'slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
+              'tooltip-in': 'tooltipIn 0.2s ease-out forwards'
+            },
+            keyframes: {
+              fadeIn: {
+                '0%': { opacity: '0', transform: 'translateY(5px)' },
+                '100%': { opacity: '1', transform: 'translateY(0)' },
+              },
+              slideUp: {
+                '0%': { transform: 'translateY(15px)', opacity: '0' },
+                '100%': { transform: 'translateY(0)', opacity: '1' },
+              },
+              tooltipIn: {
+                '0%': { opacity: '0', transform: 'translateY(8px) scale(0.95)' },
+                '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
+              }
+            }
+          },
+        },
+      }
+    </script>
+    <style>
+      html, body, #root {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      
+      body {
+        background-color: #fdfcf7;
+        background-image: linear-gradient(135deg, #fdfcf7 0%, #f7f3ed 100%);
+        color: #0f172a;
+        overflow: hidden; 
+      }
+      .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+      .custom-scrollbar::-webkit-scrollbar-track { background: #fdfcf7; }
+      .custom-scrollbar::-webkit-scrollbar-thumb { background: #dfd2bc; border-radius: 10px; border: 2px solid #fdfcf7; }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #b49977; }
+      
+      .bg-soft-pattern {
+        background-image: radial-gradient(#ece5d8 1.2px, transparent 1.2px);
+        background-size: 32px 32px;
+      }
+
+      #global-tooltip {
+        pointer-events: none;
+        position: fixed;
+        z-index: 10000;
+        background: rgba(15, 23, 42, 0.98);
+        backdrop-filter: blur(10px);
+        color: white;
+        padding: 12px 16px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        box-shadow: 0 20px 40px -10px rgba(0,0,0,0.4);
+        white-space: normal;
+        max-width: 280px;
+        display: none;
+        border: 1px solid rgba(255,255,255,0.15);
+        line-height: 1.4;
+        text-align: center;
+      }
+      
+      .animate-pulse-subtle {
+        animation: pulse-subtle 2s infinite ease-in-out;
+      }
+      @keyframes pulse-subtle {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.85; transform: scale(1.02); }
+      }
+      
+      button:active { transform: scale(0.97); transition: transform 0.1s; }
+
+      @media print {
+        header, .no-print, button, aside { display: none !important; }
+        .print-area { width: 100% !important; margin: 0 !important; }
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
+    "react-markdown": "https://esm.sh/react-markdown@^10.1.0",
+    "dexie": "https://esm.sh/dexie@^4.2.1"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-soft-pattern">
+    <div id="root"></div>
+    <div id="global-tooltip"></div>
+    <script>
+      const tooltip = document.getElementById('global-tooltip');
+      let tooltipTimer;
+      let currentTooltipTarget = null;
+
+      const showTooltip = (target) => {
+        const text = target.getAttribute('data-tooltip');
+        if (text && text.trim()) {
+          tooltip.innerText = text;
+          tooltip.style.display = 'block';
+          tooltip.classList.remove('animate-tooltip-in');
+          void tooltip.offsetWidth;
+          tooltip.classList.add('animate-tooltip-in');
+        }
+      };
+
+      const hideTooltip = () => {
+        clearTimeout(tooltipTimer);
+        tooltip.style.display = 'none';
+        currentTooltipTarget = null;
+      };
+
+      document.addEventListener('mouseover', (e) => {
+        const target = e.target.closest('[data-tooltip]');
+        if (target) {
+          if (currentTooltipTarget !== target) {
+            currentTooltipTarget = target;
+            clearTimeout(tooltipTimer);
+            tooltipTimer = setTimeout(() => showTooltip(target), 600);
+          }
+        }
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        const target = e.target.closest('[data-tooltip]');
+        
+        if (!target) {
+          hideTooltip();
+          return;
+        }
+
+        if (target && tooltip.style.display !== 'block') {
+          clearTimeout(tooltipTimer);
+          tooltipTimer = setTimeout(() => showTooltip(target), 600);
+        }
+
+        if (tooltip.style.display === 'block') {
+          const x = e.clientX + 15;
+          const y = e.clientY + 15;
+          const rightEdge = window.innerWidth - tooltip.offsetWidth - 20;
+          const bottomEdge = window.innerHeight - tooltip.offsetHeight - 20;
+          tooltip.style.left = Math.min(x, rightEdge) + 'px';
+          tooltip.style.top = Math.min(y, bottomEdge) + 'px';
+        }
+      });
+
+      document.addEventListener('mouseout', (e) => {
+        const target = e.target.closest('[data-tooltip]');
+        if (target) {
+          hideTooltip();
+        }
+      });
+
+      document.addEventListener('mousedown', hideTooltip);
+      window.addEventListener('scroll', hideTooltip, true);
+    </script>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
