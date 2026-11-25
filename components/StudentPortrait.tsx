@@ -1,19 +1,26 @@
 import React from 'react';
+import type { PhotoCrop } from '../types';
 
 interface StudentPortraitProps {
   src: string;
   name: string;
   thumbnail?: boolean;
+  crop?: PhotoCrop;
+  size?: string;
 }
 
-export function StudentPortrait({ src, name, thumbnail = false }: StudentPortraitProps) {
+export function StudentPortrait({ src, name, thumbnail = false, crop, size = 'h-7 w-7' }: StudentPortraitProps) {
   if (thumbnail) {
+    const { x, y, zoom } = crop || { x: 50, y: 0, zoom: 1.25 };
+    const position = `${x}% ${y}%`;
     return (
-      <span className="block h-7 w-7 shrink-0 overflow-hidden rounded-full">
+      <span className={`block ${size} shrink-0 overflow-hidden rounded-full bg-warm-100`}>
         <img
           src={src}
           alt=""
-          className="h-full w-full origin-top object-cover object-top scale-125"
+          draggable={false}
+          className="h-full w-full object-cover"
+          style={{ objectPosition: position, transformOrigin: position, transform: `scale(${zoom})` }}
         />
       </span>
     );

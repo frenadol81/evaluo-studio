@@ -2,7 +2,7 @@ import JSZip from 'jszip';
 
 const imageTypes: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-  webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp',
+  webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', avif: 'image/avif',
 };
 
 const wordNamespace = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -13,7 +13,40 @@ const normalize = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '')
 export interface PhotoCandidate {
   label: string;
   filename: string;
+  folders?: string[];
   read: () => Promise<string>;
+}
+
+export function isPhotoImportFile(file: File) {
+  return /\.(png|jpe?g|webp|gif|bmp|avif|docx?|odt|zip)$/i.test(file.name);
+}
+
+export async function readDroppedPhotoFiles(transfer: DataTransfer): Promise<File[]> {
+  const fallback = Array.from(transfer.files);
+  const entries = Array.from(transfer.items || []).flatMap(item => {
+    const entry = item.webkitGetAsEntry?.();
+    return entry ? [entry] : [];
+  });
+  if (!entries.length) return fallback.filter(isPhotoImportFile);
+  const files: File[] = [];
+  async function visit(entry: FileSystemEntry, folders: string[]) {
+    if (entry.isFile) {
+      const file = await new Promise<File>((resolve, reject) =>
+        (entry as FileSystemFileEntry).file(resolve, reject));
+      if (isPhotoImportFile(file)) files.push(Object.assign(file, { photoFolders: folders }));
+      return;
+    }
+    if (!entry.isDirectory) return;
+    const reader = (entry as FileSystemDirectoryEntry).createReader();
+    const path = [...folders, entry.name];
+    while (true) {
+      const children = await new Promise<FileSystemEntry[]>((resolve, reject) => reader.readEntries(resolve, reject));
+      if (!children.length) break;
+      for (const child of children) await visit(child, path);
+    }
+  }
+  for (const entry of entries) await visit(entry, []);
+  return files;
 }
 
 export function photoGroupCodes(text: string): string[] {
@@ -27,7 +60,29 @@ export function photoPlanetRound(text: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
-export function matchStudentPhotos(label: string, names: string[], exactOnly = false, withinClass = false): number[] {
+export function preselectPhotoProfiles(rows: { ids: string[]; choice: string; possibleTypo?: boolean }[],
+  identity: (id: string) => string = id => id) {
+  const used = new Set<string>();
+  const ordered = [...rows].sort((a, b) =>
+    Number(Boolean(a.possibleTypo)) - Number(Boolean(b.possibleTypo)) || a.ids.length - b.ids.length);
+  for (const row of ordered) {
+    row.choice = row.ids.find(id => !used.has(identity(id))) || '';
+    if (row.choice) used.add(identity(row.choice));
+  }
+}
+
+function differsByOneLetter(left: string, right: string): boolean {
+  if (Math.abs(left.length - right.length) > 1 || left === right) return false;
+  const [shorter, longer] = left.length <= right.length ? [left, right] : [right, left];
+  let index = 0;
+  while (index < shorter.length && shorter[index] === longer[index]) index++;
+  if (shorter.length !== longer.length) return shorter.slice(index) === longer.slice(index + 1);
+  return shorter.slice(index + 1) === longer.slice(index + 1) ||
+    (shorter[index] === longer[index + 1] && shorter[index + 1] === longer[index] &&
+      shorter.slice(index + 2) === longer.slice(index + 2));
+}
+
+export function matchStudentPhotos(label: string, names: string[], exactOnly = false, withinClass = false, allowTypos = true): number[] {
   const cleanLabel = (value: string) => normalize(value.replace(/[ºª]/g, ' '))
     .replace(/^(?:(?:[1-9](?:er|rt|r|n|t|e)? ?[a-z]|\d+|foto|fotografia|retrat|nom i cognoms|nom|alumne|alumna) )+/, '')
     .replace(/(?: [1-9](?:er|rt|r|n|t|e)? ?[a-z]| \d+| copia| copy)+$/, '');
@@ -57,18 +112,37 @@ export function matchStudentPhotos(label: string, names: string[], exactOnly = f
     }
   });
   if (full.length) return full;
-  if (withinClass && text) {
+  if (text) {
     const labelParts = text.split(' ');
     const comma = label.indexOf(',');
     const firstName = (comma >= 0 ? cleanLabel(label.slice(comma + 1)) : text).split(' ')[0];
     const sameFirstName = names.flatMap((name, index) =>
       cleanLabel(name).split(' ')[0] === firstName ? [index] : []);
-    if (labelParts.length === 1) return sameFirstName;
-    if (sameFirstName.length && sameFirstName.some(index => !cleanLabel(names[index]).includes(' '))) {
+    if (labelParts.length === 1 && sameFirstName.length) return sameFirstName;
+    if (withinClass && sameFirstName.some(index => !cleanLabel(names[index]).includes(' '))) {
       return sameFirstName;
     }
   }
-  return exactOnly ? [] : abbreviated;
+  if (exactOnly) return [];
+  if (abbreviated.length || !allowTypos) return abbreviated;
+  if (words.length === 0 || (words.length === 1 && (!withinClass || words[0].length < 5))) return [];
+
+  return names.flatMap((name, index) => {
+    const nameWords = significant(cleanLabel(name));
+    const shorter = nameWords.slice(0, words.length);
+    const candidates = words.length === 1 ? [shorter] : [
+      ...nameWords.map((_, offset) => [...nameWords.slice(offset), ...nameWords.slice(0, offset)]),
+      shorter,
+      [...shorter].reverse(),
+    ];
+    const matches = candidates.some(candidate => {
+      if (candidate.length !== words.length) return false;
+      const different = words.flatMap((word, i) => word === candidate[i] ? [] : [i]);
+      return different.length === 1 && words[different[0]].length >= 4 &&
+        differsByOneLetter(words[different[0]], candidate[different[0]]);
+    });
+    return matches ? [index] : [];
+  });
 }
 
 async function preparePhoto(blob: Blob): Promise<Blob> {
@@ -247,10 +321,13 @@ export async function readStudentPhotos(file: File, names: string[], withinClass
       if (entry.dir || entry.name.includes('__MACOSX/')) return [];
       const filename = entry.name.split('/').pop() || entry.name;
       const candidate = imageCandidate(filename, filename.replace(/\.[^.]+$/, ''), () => entry.async('blob'));
-      return candidate ? [candidate] : [];
+      return candidate ? [{ ...candidate, folders: entry.name.split('/').slice(0, -1) }] : [];
     });
   }
-  const photo = imageCandidate(file.name, file.name.replace(/\.[^.]+$/, ''), async () => file);
+  const extensionFromMime = Object.entries(imageTypes).find(([, type]) => type === file.type)?.[0];
+  const filename = extensionFromMime && (!extension || !imageTypes[extension])
+    ? `${file.name}.${extensionFromMime}` : file.name;
+  const photo = imageCandidate(filename, file.name.replace(/\.[^.]+$/, ''), async () => file);
   if (!photo) throw new Error('Format no compatible.');
   return [photo];
 }

@@ -25,7 +25,9 @@ export const createStudent = (raw = {}, trimesterId = 2) => {
     groupId: raw.info?.groupId || raw.groupId || 'G1',
     course: raw.info?.course || raw.course || "",
     order: raw.info?.order ?? raw.order ?? Date.now(),
-    photoUrl: raw.info?.photoUrl ?? raw.photoUrl ?? ""
+    photoUrl: raw.info?.photoUrl ?? raw.photoUrl ?? "",
+    photoCrop: raw.info?.photoCrop,
+    supportRole: raw.info?.supportRole
   };
 
   const metrics = {

@@ -13,6 +13,7 @@ import { ReportResult } from './ReportResult';
 import { NuanceEditor } from './NuanceEditor';
 import { PedagogicalInspector } from '../ui/components/PedagogicalInspector';
 import { StudentPortrait } from './StudentPortrait';
+import { isReportOutdated } from '../application/useCases/reportFingerprint.js';
 
 const PersonalityMatrixView = ({ students, onUpdateStudentField, trimester, setSelectedStudentId, onEditStudentDetails, groups, activeGroupId }: any) => {
   const [activeStudentModal, setActiveStudentModal] = useState<any | null>(null);
@@ -64,7 +65,7 @@ const PersonalityMatrixView = ({ students, onUpdateStudentField, trimester, setS
                     title="Veure perfil individual"
                   >
                     {student.info.photoUrl ? (
-                      <StudentPortrait src={student.info.photoUrl} name={student.info.name} thumbnail />
+                      <StudentPortrait src={student.info.photoUrl} name={student.info.name} crop={student.info.photoCrop} thumbnail />
                     ) : <UserCircle className="w-5 h-5" />}
                   </button>
                   <div className="flex flex-col min-w-0">
@@ -387,7 +388,8 @@ export const BatchMode = ({
     setSelectedStudentId,
     trimester
 }: any) => {
-  const [viewMode, setViewMode] = useState<'list' | 'matrix' | 'traits'>('traits');
+  const [viewMode, setViewMode] = useState<'list' | 'matrix' | 'traits'>('list');
+  const [pendingReviewOnly, setPendingReviewOnly] = useState(false);
   const [density, setDensity] = useState<'balanced' | 'compact' | 'wide'>('balanced');
   const [activeTabId, setActiveTabId] = useState('habits_treball');
   const [reportInLabOpen, setReportInLabOpen] = useState(false);
@@ -408,9 +410,15 @@ export const BatchMode = ({
 
   const rubrics = useMemo(() => getRubricsForTrimester(trimester), [trimester]);
   
-  const filteredStudents = useMemo(() => {
+  const groupStudents = useMemo(() => {
     return students.filter(s => activeGroupId === 'ALL' || (s.info?.groupId || s.groupId) === activeGroupId);
   }, [students, activeGroupId]);
+  const outdatedReports = new Set(groupStudents.filter(s => isReportOutdated(s, trimester)).map(s => s.id));
+  const pendingReview = groupStudents.filter(s => s.state?.generatedReport?.trim() &&
+    (s.state.status !== 'reviewed' || outdatedReports.has(s.id)));
+  const reviewed = groupStudents.filter(s => s.state?.generatedReport?.trim() &&
+    s.state.status === 'reviewed' && !outdatedReports.has(s.id));
+  const filteredStudents = pendingReviewOnly ? pendingReview : groupStudents;
 
   const activeRubric = rubrics.find(r => r.id === activeTabId);
   const currentRubricLevels = useMemo(() => getRubricLevels(activeRubric), [activeRubric]);
@@ -430,8 +438,11 @@ export const BatchMode = ({
 
   const cancelBulkRef = useRef(false);
 
-  const handleGenerateAllPending = async () => {
-    const pending = filteredStudents.filter(s => !s.state?.generatedReport && s.state?.status !== 'generating');
+  const failedReports = groupStudents.filter(s => s.state?.status === 'error');
+  const handleGenerateAllPending = async (retryFailures = false) => {
+    if (isBulkGenerating) return;
+    const pending = retryFailures ? failedReports :
+      groupStudents.filter(s => !s.state?.generatedReport && s.state?.status !== 'generating');
     if (pending.length === 0) return;
     
     setIsBulkGenerating(true);
@@ -464,8 +475,8 @@ export const BatchMode = ({
     setIsStopping(true);
   };
 
-  const handleExportToWord = () => {
-    const studentsWithReport = filteredStudents.filter(s => s.state?.generatedReport);
+  const handleExportToWord = (reviewedOnly = false) => {
+    const studentsWithReport = reviewedOnly ? reviewed : groupStudents.filter(s => s.state?.generatedReport);
     if (studentsWithReport.length === 0) return;
 
     const className = activeGroupId === 'ALL' ? 'Tots els Alumnes' : groups.find(g => g.id === activeGroupId)?.name || 'Classe';
@@ -587,12 +598,24 @@ export const BatchMode = ({
 
          <div className="flex items-center gap-4">
              <button 
-                 onClick={handleExportToWord} 
-                disabled={filteredStudents.filter(s => s.state?.generatedReport).length === 0}
+                 onClick={() => handleExportToWord()}
+                disabled={!groupStudents.some(s => s.state?.generatedReport)}
                 className="flex items-center gap-2 px-6 py-2.5 bg-primary-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all shadow-xl disabled:opacity-30 disabled:pointer-events-none active:scale-95"
             >
                 <FileDown className="w-4 h-4 text-primary-300" />
                 Exportar a Word
+            </button>
+            <button type="button" aria-pressed={pendingReviewOnly}
+                onClick={() => {
+                    setPendingReviewOnly(!pendingReviewOnly);
+                    if (!pendingReviewOnly) setViewMode('list');
+                }}
+                className="rounded-xl border border-warm-200 px-3 py-2 text-xs font-bold aria-pressed:bg-warm-100">
+                Pendents de revisar ({pendingReview.length})
+            </button>
+            <button type="button" onClick={() => handleExportToWord(true)} disabled={!reviewed.length}
+                className="rounded-xl border border-warm-200 px-3 py-2 text-xs font-bold disabled:opacity-40">
+                Exportar revisats ({reviewed.length})
             </button>
             {isBulkGenerating ? (
               <button 
@@ -606,12 +629,18 @@ export const BatchMode = ({
               </button>
             ) : (
               <button 
-                onClick={handleGenerateAllPending} 
-                disabled={filteredStudents.filter(s => !s.state?.generatedReport).length === 0}
+                onClick={() => void handleGenerateAllPending()}
+                disabled={!groupStudents.some(s => !s.state?.generatedReport && s.state?.status !== 'generating')}
                 className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all shadow-xl disabled:opacity-30 disabled:pointer-events-none active:scale-95"
               >
                 <Sparkles className="w-4 h-4 text-amber-300" />
                 Generar Pendents
+              </button>
+            )}
+            {failedReports.length > 0 && (
+              <button type="button" disabled={isBulkGenerating} onClick={() => void handleGenerateAllPending(true)}
+                className="rounded-xl border border-rose-200 px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-40">
+                Reintentar errors ({failedReports.length})
               </button>
             )}
             <div className="flex bg-warm-50 border border-warm-200 rounded-xl p-0.5 shadow-inner">
@@ -688,7 +717,7 @@ export const BatchMode = ({
                                   title="Veure detalls de l'alumne"
                                >
                                   {s.info.photoUrl ? (
-                                    <StudentPortrait src={s.info.photoUrl} name={s.info.name} thumbnail />
+                                    <StudentPortrait src={s.info.photoUrl} name={s.info.name} crop={s.info.photoCrop} thumbnail />
                                   ) : <UserCircle className="w-4 h-4" />}
                                </button>
                                 <div className="flex items-center gap-1.5 w-full overflow-hidden">
@@ -866,7 +895,7 @@ export const BatchMode = ({
                                             title="Veure detalls de l'alumne"
                                         >
                                             {s.info.photoUrl ? (
-                                                <StudentPortrait src={s.info.photoUrl} name={s.info.name} thumbnail />
+                                                <StudentPortrait src={s.info.photoUrl} name={s.info.name} crop={s.info.photoCrop} thumbnail />
                                             ) : <UserCircle className="w-4 h-4" />}
                                         </button>
                                         <div className="flex items-center gap-2 w-full">
@@ -982,7 +1011,7 @@ export const BatchMode = ({
                                             <CircleDashed className={`${dc.icon} text-slate-300 group-hover/done:scale-125 transition-transform pointer-events-none`} />
                                         )}
                                         <span className={`text-[8px] font-black uppercase tracking-widest pointer-events-none ${isReviewed ? 'text-indigo-600' : isCompleted ? 'text-emerald-600' : 'text-slate-400'}`}>
-                                            {isReviewed ? 'Revisat' : isCompleted ? 'Enllestit' : 'Pendent'}
+                                            {outdatedReports.has(s.id) ? 'Desactualitzat' : isReviewed ? 'Revisat' : isCompleted ? 'Enllestit' : 'Pendent'}
                                         </span>
                                     </button>
                                 ) : (

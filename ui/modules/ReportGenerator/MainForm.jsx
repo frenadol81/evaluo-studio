@@ -1,6 +1,9 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { StudentPortrait } from '../../../components/StudentPortrait';
+import { buildReportPrompt } from '../../../infrastructure/api/promptBuilder';
+import { calculatePromptConfig } from '../../../core/logic/toneMatrix';
+import { reportFingerprint } from '../../../application/useCases/reportFingerprint';
 import { 
   Sparkles, Loader2, Mic, Quote, MessageSquare, 
   UserRoundSearch, Workflow, BookText, 
@@ -78,6 +81,7 @@ const SortableTabItem = ({ tab, activeTab, isProcessing, onTabChange }) => {
 export const MainForm = ({ student, onUpdateStudent, onBack, initialTab, onGenerateReport, trimester }) => {
   const rubrics = getRubricsForTrimester(trimester);
   const [toneConfig, setToneConfig] = useState({ styleLevel: 0.5, intensityLevel: 0 });
+  const [manualReport, setManualReport] = useState(null);
   const [makerConfig, setMakerConfig] = useState({ technicalLevel: 0.5, creativeFreedom: 0.5, customMakerPrompt: MAKER_SYSTEM_INSTRUCTION });
   const [planetaBlauConfig, setPlanetaBlauConfig] = useState({ customPlanetaBlauPrompt: PLANETA_BLAU_SYSTEM_INSTRUCTION });
   const [activeTab, setActiveTab] = useState(initialTab || 'personalitat');
@@ -195,6 +199,36 @@ export const MainForm = ({ student, onUpdateStudent, onBack, initialTab, onGener
 
   const currentReport = student?.state?.generatedReport;
 
+  const openManualReport = () => {
+    const { systemInstruction } = calculatePromptConfig(toneConfig.styleLevel, toneConfig.intensityLevel);
+    const anonymousStudent = { ...student, info: { ...student.info, name: 'ALUMNE' } };
+    setManualReport({
+      prompt: buildReportPrompt(anonymousStudent, systemInstruction, rubrics, trimester),
+      text: '',
+      fingerprint: reportFingerprint(student, toneConfig, trimester),
+      saving: false,
+      error: '',
+    });
+  };
+
+  const saveManualReport = async () => {
+    if (!manualReport?.text.trim() || manualReport.saving) return;
+    setManualReport({ ...manualReport, saving: true });
+    try {
+      await onUpdateStudent({ state: {
+        ...student.state,
+        generatedReport: manualReport.text.trim().replace(/\bALUMNE\b/g, () => student.info.name.split(' ')[0]),
+        status: 'completed',
+        reportFingerprint: manualReport.fingerprint,
+        lastModified: new Date().toISOString(),
+      } });
+      setManualReport(null);
+      setActiveTab('narrativa');
+    } catch {
+      setManualReport({ ...manualReport, saving: false, error: 'No s’ha pogut desar el text.' });
+    }
+  };
+
   const handleUpdateContent = (field, value) => {
     onUpdateStudent({ content: { ...student.content, [field]: value } });
   };
@@ -296,6 +330,31 @@ export const MainForm = ({ student, onUpdateStudent, onBack, initialTab, onGener
 
   return (
     <div className="flex h-full bg-white overflow-hidden relative">
+      {manualReport && (
+        <div className="fixed inset-0 z-[120] grid place-items-center bg-slate-900/60 p-4">
+          <section role="dialog" aria-modal="true" aria-labelledby="manual-report-title"
+            className="max-h-[90vh] w-full max-w-2xl space-y-3 overflow-auto rounded-2xl bg-white p-5 shadow-xl">
+            <h2 id="manual-report-title" className="text-lg font-bold">Redactar amb ChatGPT</h2>
+            <p className="text-sm text-slate-600">Revisa el text i elimina dades identificatives de les observacions abans de copiar-lo. Enganxa aquí el resultat per desar-lo com a esborrany pendent de revisió.</p>
+            <textarea aria-label="Instruccions per copiar" className="h-40 w-full rounded-lg border p-2 text-sm"
+              value={manualReport.prompt} onChange={event => setManualReport({ ...manualReport, prompt: event.target.value })} />
+            <button type="button" className="text-sm font-bold text-primary-800"
+              onClick={async () => {
+                try { await navigator.clipboard.writeText(manualReport.prompt); }
+                catch { setManualReport({ ...manualReport, error: 'Selecciona el text i copia’l manualment.' }); }
+              }}>Copiar instruccions</button>
+            <textarea aria-label="Esborrany de l’informe" placeholder="Enganxa l’esborrany aquí"
+              className="h-40 w-full rounded-lg border p-2 text-sm" value={manualReport.text}
+              onChange={event => setManualReport({ ...manualReport, text: event.target.value })} />
+            {manualReport.error && <p role="alert" className="text-sm text-rose-700">{manualReport.error}</p>}
+            <div className="flex justify-end gap-3">
+              <button type="button" disabled={manualReport.saving} onClick={() => setManualReport(null)}>Cancel·la</button>
+              <button type="button" disabled={manualReport.saving || !manualReport.text.trim()} onClick={saveManualReport}
+                className="rounded-xl bg-primary-900 px-4 py-2 text-sm text-white disabled:opacity-40">Desa l’esborrany</button>
+            </div>
+          </section>
+        </div>
+      )}
       {isProcessing && (
         <div className="absolute inset-0 z-[1000] bg-white/60 backdrop-blur-sm flex flex-col items-center justify-center animate-fade-in">
            <div className="bg-primary-900 p-8 rounded-[3rem] shadow-2xl flex flex-col items-center gap-6">
@@ -346,6 +405,10 @@ export const MainForm = ({ student, onUpdateStudent, onBack, initialTab, onGener
             </div>
 
             <div className="flex items-center gap-2">
+                <button type="button" disabled={isProcessing} onClick={openManualReport}
+                    className="rounded-lg border border-warm-200 px-3 py-1.5 text-xs font-bold">
+                    Redactar amb ChatGPT
+                </button>
                 {duplicates.length > 0 && (
                   <button 
                     onClick={() => setShowSyncModal(true)}

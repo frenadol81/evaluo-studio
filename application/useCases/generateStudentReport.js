@@ -1,3 +1,4 @@
+import { reportFingerprint } from './reportFingerprint.js';
 
 import { calculatePromptConfig } from '../../core/logic/toneMatrix.js';
 import { buildReportPrompt } from '../../infrastructure/api/promptBuilder.js';
@@ -6,7 +7,6 @@ import { db } from '../../infrastructure/storage/db';
 import { MAKER_SYSTEM_INSTRUCTION, SYSTEM_INSTRUCTION, PLANETA_BLAU_SYSTEM_INSTRUCTION } from '../../constants';
 import { getRubricsForTrimester } from '../../core/config/rubrics/index.js';
 import { buildPlanetaBlauReport } from './buildPlanetaBlauReport.js';
-import { REPORT_WRITING_RULES_VERSION } from '../../core/config/reportWritingRules.js';
 
 /**
  * Cas d'ús: Generar Informe d'Alumne
@@ -14,7 +14,6 @@ import { REPORT_WRITING_RULES_VERSION } from '../../core/config/reportWritingRul
  */
 export const executeGenerateReport = async (student, configUI, trimester = 2) => {
   try {
-    const { content } = student;
     const rubrics = getRubricsForTrimester(trimester);
 
     // 1. Calcular la configuració de prompt (paràmetres tècnics)
@@ -25,43 +24,7 @@ export const executeGenerateReport = async (student, configUI, trimester = 2) =>
 
     // --- SISTEMA DE HUELLA / CACHÉ ---
     // Historial trimestral que influeix directament en la redacció de l'informe
-    const previousTrimestersHistory = student.trimesters && trimester > 1
-      ? Object.keys(student.trimesters)
-          .map(Number)
-          .filter(t => t < trimester)
-          .sort((a, b) => a - b)
-          .map(t => {
-            const data = student.trimesters[t];
-            return {
-              t,
-              tags: data?.content?.tags || [],
-              report: data?.state?.generatedReport ? data.state.generatedReport.substring(0, 300) : ""
-            };
-          })
-      : [];
-
-    // Generem una huella digital completa de totes les dades d'entrada rellevants
-    const currentFingerprint = JSON.stringify({
-      rulesVersion: REPORT_WRITING_RULES_VERSION,
-      mathRegister: content.mathRegister || student.trimesters?.[trimester]?.content?.mathRegister || null,
-      tags: content.tags || [],
-      nuances: content.nuances || {},
-      maker: content.maker || {},
-      planetaBlau: content.planetaBlau || {},
-      anecdote: content.anecdote || "",
-      selfAssessment: content.selfAssessment || "",
-      recommendations: content.recommendations || [],
-      manualObservations: content.manualObservations || [],
-      evolutionPhrases: content.evolutionPhrases || [],
-      config: configUI || {},
-      trimester: trimester,
-      studentInfo: { 
-        name: student.info?.name, 
-        gender: student.info?.gender,
-        isPI: student.info?.isPI ?? false
-      },
-      history: previousTrimestersHistory
-    });
+    const currentFingerprint = reportFingerprint(student, configUI, trimester);
 
     // Si ja existeix un informe i la huella coincideix, retornem el que ja tenim (tret que es forci la regeneració)
     if (!configUI?.forceRegenerate && student.state?.generatedReport && student.state?.reportFingerprint === currentFingerprint) {

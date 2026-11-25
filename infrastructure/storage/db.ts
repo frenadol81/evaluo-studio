@@ -1,5 +1,7 @@
 
 import Dexie, { type Table } from 'dexie';
+import type { PhotoCrop } from '../../types';
+import type { SupportRole } from '../services/classroomGrouping';
 
 export interface Student {
   id: string;
@@ -12,6 +14,8 @@ export interface Student {
     course?: string;
     groupId?: string;
     photoUrl?: string;
+    photoCrop?: PhotoCrop;
+    supportRole?: SupportRole;
   };
   content: {
     tags: string[];
@@ -56,9 +60,20 @@ export interface Class {
   year: string;
 }
 
+export interface ClassroomEvidence {
+  id: string;
+  pupilId: string;
+  groupId: string;
+  date: string;
+  label: string;
+  source: 'classroom' | 'classdojo';
+  points?: number;
+}
+
 export class EvaluoDB extends Dexie {
   students!: Table<Student, string | number>;
   classes!: Table<Class>;
+  classroomEvidence!: Table<ClassroomEvidence, string>;
 
   constructor() {
     super('EvaluoDB');
@@ -66,6 +81,7 @@ export class EvaluoDB extends Dexie {
       classes: '++id, name, year',
       students: 'id, groupId, info.name, state.status'
     });
+    this.version(2).stores({ classroomEvidence: 'id, pupilId, groupId' });
   }
 }
 

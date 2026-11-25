@@ -1,9 +1,12 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { matchStudentPhotos, photoGroupCodes, photoPlanetRound, readStudentPhotos } from './infrastructure/services/studentPhotoImport';
+import { matchStudentPhotos, photoGroupCodes, photoPlanetRound, preselectPhotoProfiles, readStudentPhotos } from './infrastructure/services/studentPhotoImport';
 import { MainForm } from './ui/modules/ReportGenerator/MainForm';
 import { ProfileSelector } from './ui/components/ProfileSelector';
 import { BatchMode } from './components/BatchMode';
+import { ClassroomStudio } from './components/ClassroomStudio';
+import { mergeClothingEvidence } from './infrastructure/services/peClothing';
+import { studentMemberships, withSharedStudentPhotos } from './infrastructure/services/studentMemberships';
 import { createStudent } from './core/domain/student.model.js';
 import { db, initDB } from './infrastructure/storage/db';
 import { executeGenerateReport } from './application/useCases/generateStudentReport.js';
@@ -13,7 +16,7 @@ import { parseConferenceRegister, type ParseConferencesResult } from './infrastr
 import { parseReadingDocument, type ParseReadingResult } from './infrastructure/services/readingRegisterParser';
 import { getRubricsForTrimester } from './core/config/rubrics/index.js';
 import { healStudentTags } from './core/utils/rubricMatcher.js';
-import { signInWithGoogleDrive, downloadStudentPhotoFiles } from './services/googleDriveService';
+import { signInWithGoogleDrive, downloadStudentPhotoFiles, type DrivePhotoFile } from './services/googleDriveService';
 import { 
   Layers, Users, Plus, LayoutDashboard, 
   UserPlus, X, Download, Upload, Loader2,
@@ -97,11 +100,12 @@ const SortableGroupItem = ({ g, isSidebarOpen, activeGroupId, viewMode, onSelect
 };
 
 const App: React.FC = () => {
-  const [viewMode, setViewMode] = useState<'individual' | 'aula'>('aula');
+  const [viewMode, setViewMode] = useState<'individual' | 'aula' | 'organitzacio'>('aula');
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [initialTab, setInitialTab] = useState<string>('personalitat');
-  const [students, setStudents] = useState<any[]>([]);
+  const [studentRecords, setStudents] = useState<any[]>([]);
   const [groups, setGroups] = useState<any[]>([]);
+  const students = React.useMemo(() => withSharedStudentPhotos(studentRecords, groups), [studentRecords, groups]);
   const [activeGroupId, setActiveGroupId] = useState('ALL');
   const [selectedTrimester, setSelectedTrimester] = useState<number>(() => {
     const saved = localStorage.getItem('evaluo_trimester');
@@ -112,7 +116,8 @@ const App: React.FC = () => {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showDeleteClassConfirm, setShowDeleteClassConfirm] = useState<string | null>(null);
   const [showDriveModal, setShowDriveModal] = useState(false);
-  const [driveFolderId, setDriveFolderId] = useState(localStorage.getItem('evaluo_drive_folder_id') || '');
+  const [driveFolderId, setDriveFolderId] = useState(localStorage.getItem('evaluo_drive_folder_id') ||
+    import.meta.env.VITE_DRIVE_PHOTO_FOLDER || '');
   const [driveUserEmail, setDriveUserEmail] = useState<string | null>(null);
   const [importPreviewData, setImportPreviewData] = useState<{
     students: any[];
@@ -138,6 +143,7 @@ const App: React.FC = () => {
   const fileInputConferenceRef = useRef<HTMLInputElement>(null);
   const fileInputReadingRef = useRef<HTMLInputElement>(null);
   const fileInputLocalPhotosRef = useRef<HTMLInputElement>(null);
+  const folderInputPhotosRef = useRef<HTMLInputElement>(null);
   const [espaisSummaryModal, setEspaisSummaryModal] = useState<ParseEspaisResult | null>(null);
   const [activeEspaiRoundPreview, setActiveEspaiRoundPreview] = useState<number>(1);
   const [isSyncingDrivePhotos, setIsSyncingDrivePhotos] = useState(false);
@@ -146,20 +152,25 @@ const App: React.FC = () => {
   const [photoImportMessage, setPhotoImportMessage] = useState('');
 
   const [photoReview, setPhotoReview] = useState<{
-    rows: { url: string; label: string; ids: string[]; choice: string; groupCode?: string; planetRound?: number }[];
-    roster: { id: string; dbKey: string | number; name: string; group: string; groupCode?: string; planetRound?: number; hasPhoto: boolean }[];
+    rows: { url: string; label: string; ids: string[]; choice: string; groupCode?: string; planetRound?: number; otherGroups?: string[]; possibleTypo?: boolean; lastMissing?: boolean }[];
+    roster: { id: string; identity: string; dbKey: string | number; name: string; group: string; groupId: string; groupCode?: string; planetRound?: number; hasPhoto: boolean }[];
     errors: string[];
   } | null>(null);
 
-  const handleUploadLocalPhotos = async (files: FileList | File[] | null) => {
-    if (!files?.length || isUploadingPhotos || photoReview) return;
+  const handleUploadLocalPhotos = async (files: FileList | File[] | null, warnings: string[] = [], selectedPhotoGroup?: string) => {
+    if (isUploadingPhotos || photoReview) return;
+    if (!files?.length) {
+      if (warnings.length) alert(warnings.join('\n'));
+      return;
+    }
     const inputFiles = Array.from(files);
-    const errors: string[] = [];
+    const errors = [...warnings];
     const rows: NonNullable<typeof photoReview>['rows'] = [];
     setPhotoImportMessage('');
     setIsUploadingPhotos(true);
     try {
-      const studentsInDb = await db.students.toArray();
+      const studentsInDb = withSharedStudentPhotos(await db.students.toArray(), groups);
+      const identities = studentMemberships(studentsInDb, groups);
       const roster = studentsInDb.map(student => {
         const groupId = student.info.groupId || student.groupId;
         const group = groups.find(group => group.id === groupId)?.name || groupId || student.info.course || '';
@@ -172,9 +183,11 @@ const App: React.FC = () => {
         const groupCode = planetRound ? origin : codes.length === 1 ? codes[0] : idCodes.length === 1 ? idCodes[0] : origin;
         return {
           id: String(student.id),
+          identity: identities.get(String(student.id)) || String(student.id),
           dbKey: student.id,
           name: student.info.name,
           group: planetRound ? `Planeta · Ronda ${planetRound}${origin ? ' · Origen ' + origin : ''}` : group,
+          groupId,
           groupCode,
           planetRound,
           hasPhoto: Boolean(student.info.photoUrl),
@@ -187,8 +200,11 @@ const App: React.FC = () => {
       for (const file of inputFiles) {
         try {
           const codes = photoGroupCodes(file.name.replace(/\.[^.]+$/, ''));
-          const groupCode = codes.length === 1 ? codes[0] : undefined;
-          const planetRound = photoPlanetRound(file.name);
+          const folders = (file as Partial<DrivePhotoFile>).photoFolders ||
+            file.webkitRelativePath?.split('/').slice(0, -1) || [];
+          const parentCodes = [...folders].reverse().map(photoGroupCodes).find(found => found.length === 1);
+          const groupCode = codes.length === 1 ? codes[0] : codes.length === 0 ? parentCodes?.[0] : undefined;
+          const planetRound = photoPlanetRound(file.name) ?? [...folders].reverse().map(photoPlanetRound).find(Boolean);
           const eligible = roster.filter(student =>
             (!groupCode || student.groupCode === groupCode) && (!planetRound || student.planetRound === planetRound));
           const names = eligible.map(student => student.name);
@@ -196,15 +212,31 @@ const App: React.FC = () => {
           if (!photos.length) errors.push(file.name + ': cap foto compatible.');
           for (const photo of photos) {
             try {
-              const ids = matchStudentPhotos(photo.label, names, false, Boolean(groupCode)).map(index => eligible[index].id);
-              const exactMatches = matchStudentPhotos(photo.label, names, true, Boolean(groupCode));
+              const entryCodes = [...(photo.folders || [])].reverse().map(photoGroupCodes).find(found => found.length === 1);
+              const photoGroup = entryCodes?.[0] || groupCode;
+              const photoRoster = photoGroup === groupCode ? eligible :
+                roster.filter(student => student.groupCode === photoGroup && (!planetRound || student.planetRound === planetRound));
+              const photoNames = photoRoster.map(student => student.name);
+              const candidates = matchStudentPhotos(photo.label, photoNames, false, Boolean(photoGroup)).map(index => photoRoster[index]);
+              const distinct = new Map<string, typeof roster[number]>();
+              for (const candidate of candidates) {
+                if (!distinct.has(candidate.identity) || candidate.id === candidate.identity) distinct.set(candidate.identity, candidate);
+              }
+              const ids = [...distinct.values()].map(candidate => candidate.id);
+              const possibleTypo = ids.length > 0 && !matchStudentPhotos(photo.label, photoNames, false, Boolean(photoGroup), false).length;
+              const otherGroups = !ids.length && photoGroup
+                ? [...new Set(matchStudentPhotos(photo.label, roster.map(student => student.name))
+                  .map(index => roster[index].group).filter(Boolean))]
+                : undefined;
               rows.push({
                 url: await photo.read(),
                 label: photo.label || (photo.filename === file.name ? file.name : file.name + ' · ' + photo.filename.split('/').pop()),
                 ids,
-                groupCode,
+                groupCode: photoGroup,
                 planetRound,
-                choice: ids.length === 1 && (exactMatches.length === 1 || (groupCode && eligible.find(student => student.id === ids[0])?.planetRound)) ? ids[0] : '',
+                choice: '',
+                otherGroups,
+                possibleTypo,
               });
             } catch {
               errors.push(photo.filename + ': error de lectura.');
@@ -215,13 +247,18 @@ const App: React.FC = () => {
         }
       }
 
-      const candidateCounts = new Map<string, number>();
-      for (const row of rows) {
-        for (const id of row.ids) candidateCounts.set(id, (candidateCounts.get(id) || 0) + 1);
+      if (selectedPhotoGroup && rows.length === 1 && inputFiles.length === 1 &&
+          /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(inputFiles[0].name)) {
+        const row = rows[0];
+        const pending = roster.filter(student => student.groupId === selectedPhotoGroup && !student.hasPhoto);
+        if (!row.ids.length && !row.otherGroups?.length && pending.length === 1 &&
+          (!row.groupCode || row.groupCode === pending[0].groupCode) &&
+          (!row.planetRound || row.planetRound === pending[0].planetRound)) {
+          row.ids = [pending[0].id];
+          row.lastMissing = true;
+        }
       }
-      for (const row of rows) {
-        if (candidateCounts.get(row.choice) !== 1) row.choice = '';
-      }
+      preselectPhotoProfiles(rows, id => identities.get(id) || id);
       if (rows.length) setPhotoReview({ rows, roster, errors });
       else alert(errors.join('\n') || 'No hi ha fotos per revisar.');
     } catch (error) {
@@ -237,6 +274,8 @@ const App: React.FC = () => {
     setIsUploadingPhotos(true);
     try {
       const saved = new Map<string, string>();
+      const confirmed = new Set<string>();
+      const savedIdentities = new Set<string>();
       const profiles = new Map<string, NonNullable<typeof photoReview>['roster'][number]>();
       for (const profile of photoReview.roster) profiles.set(profile.id, profile);
       const failures: string[] = [];
@@ -246,9 +285,17 @@ const App: React.FC = () => {
           const profile = profiles.get(row.choice);
           if (!profile || (row.groupCode && row.groupCode !== profile.groupCode) ||
               (row.planetRound && row.planetRound !== profile.planetRound)) throw new Error('el perfil no és del grup del fitxer');
-          const updated = await db.students.update(profile.dbKey, { 'info.photoUrl': row.url });
-          if (!updated) throw new Error('el perfil ja no és a la llista');
-          saved.set(row.choice, row.url);
+          if (savedIdentities.has(profile.identity)) throw new Error('ja s’ha desat una foto per a aquest alumne');
+          const related = photoReview.roster.filter(student => student.identity === profile.identity);
+          await db.transaction('rw', db.students, async () => {
+            for (const student of related) {
+              const updated = await db.students.update(student.dbKey, { 'info.photoUrl': row.url, 'info.photoCrop': undefined });
+              if (!updated) throw new Error('el perfil ja no és a la llista');
+            }
+          });
+          for (const student of related) saved.set(student.id, row.url);
+          confirmed.add(row.choice);
+          savedIdentities.add(profile.identity);
         } catch (error) {
           const reason = error instanceof Error && error.name === 'QuotaExceededError'
             ? 'el navegador no té prou espai'
@@ -258,15 +305,15 @@ const App: React.FC = () => {
       }
       const updatePhotos = (list: typeof students) => list.map(student => {
         const photoUrl = saved.get(String(student.id));
-        return photoUrl ? { ...student, info: { ...student.info, photoUrl } } : student;
+        return photoUrl ? { ...student, info: { ...student.info, photoUrl, photoCrop: undefined } } : student;
       });
       studentsRef.current = updatePhotos(studentsRef.current);
       setStudents(updatePhotos);
-      const summary = 'Fotos desades: ' + saved.size + '. Fotos sense assignar: ' + (photoReview.rows.length - saved.size) + '.';
+      const summary = 'Fotos desades: ' + confirmed.size + '. Fotos sense assignar: ' + (photoReview.rows.length - confirmed.size) + '.';
       if (failures.length) {
         setPhotoReview({
           ...photoReview,
-          rows: photoReview.rows.filter(row => !saved.has(row.choice)),
+          rows: photoReview.rows.filter(row => !confirmed.has(row.choice)),
           roster: photoReview.roster.map(student => saved.has(student.id) ? { ...student, hasPhoto: true } : student),
           errors: [summary, ...failures],
         });
@@ -291,13 +338,16 @@ const App: React.FC = () => {
         return db.students.toCollection().modify(student => {
           const legacy = student as typeof student & { photoUrl?: string };
           if (!student.info?.photoUrl && !legacy.photoUrl) return false;
-          if (student.info) student.info.photoUrl = '';
+          if (student.info) {
+            student.info.photoUrl = '';
+            delete student.info.photoCrop;
+          }
           delete legacy.photoUrl;
         });
       });
       const clearPhotos = (list: typeof students) => list.map(student => ({
         ...student,
-        info: { ...student.info, photoUrl: '' },
+        info: { ...student.info, photoUrl: '', photoCrop: undefined },
       }));
       studentsRef.current = clearPhotos(studentsRef.current);
       setStudents(clearPhotos);
@@ -323,7 +373,8 @@ const App: React.FC = () => {
       if (!targetFolderId.trim()) throw new Error('Cal indicar una carpeta de Drive.');
       localStorage.setItem('evaluo_drive_folder_id', targetFolderId);
 
-      await handleUploadLocalPhotos(await downloadStudentPhotoFiles(targetFolderId, accessToken));
+      const result = await downloadStudentPhotoFiles(targetFolderId, accessToken);
+      await handleUploadLocalPhotos(result.files, result.files.length ? result.errors : [...result.errors, 'No s’han trobat fotos compatibles a la carpeta.']);
     } catch (err: any) {
       console.error('Error sincronitzant fotos de Drive:', err);
       alert(`No s'ha pogut connectar amb Google Drive (${err.message || 'Error de permisos o finestra emergent'}). Recomanació: utilitza l'opció "Seleccionar i Pujar Fotos de l'Ordinador" a continuació.`);
@@ -332,8 +383,65 @@ const App: React.FC = () => {
     }
   };
 
+  const [registerPreview, setRegisterPreview] = useState<{
+    title: string;
+    updated: string[];
+    created: string[];
+    unmatched: string[];
+  } | null>(null);
+  const registerPreviewRef = useRef<((apply: boolean) => void) | null>(null);
+
+  const applyRegisterPreview = async (title: string, records: any[], before: any[], unmatched: string[]) => {
+    if (registerPreviewRef.current) return false;
+    const previous = new Map(before.map(student => [student.id, student]));
+    const unique = [...new Map(records.map(student => [student.id, student])).values()];
+    const changed = unique.filter(student => JSON.stringify(previous.get(student.id)) !== JSON.stringify(student));
+    const label = (student: any) => student.info.course
+      ? `${student.info.name} · ${student.info.course}` : student.info.name;
+    const describeUpdate = (student: any) => {
+      const old = previous.get(student.id);
+      if (title === 'Velocitat lectora' && old.metrics?.readingSpeed !== student.metrics?.readingSpeed) {
+        const prior = old.metrics?.readingSpeed || 'sense registre';
+        return `${label(student)} · ${prior} → ${student.metrics.readingSpeed} ppm`;
+      }
+      if (title === 'Planeta Blau' && old.info?.course !== student.info.course) {
+        return `${label(student)} · curs anterior: ${old.info?.course || 'sense curs'}`;
+      }
+      return label(student);
+    };
+    const approved = await new Promise<boolean>(resolve => {
+      registerPreviewRef.current = resolve;
+      setRegisterPreview({
+        title,
+        updated: changed.filter(student => previous.has(student.id)).map(describeUpdate),
+        created: changed.filter(student => !previous.has(student.id)).map(label),
+        unmatched: [...new Set(unmatched)],
+      });
+    });
+    if (!approved) return false;
+    await db.transaction('rw', db.students, async () => {
+      const current = await db.students.bulkGet(changed.map(student => student.id));
+      if (changed.some((student, index) =>
+        JSON.stringify(previous.get(student.id)) !== JSON.stringify(current[index]))) {
+        throw new Error('La llista ha canviat durant la revisió. Torna a obrir el fitxer.');
+      }
+      await db.students.bulkPut(changed);
+    });
+    return true;
+  };
+
+  const finishRegisterPreview = (apply: boolean) => {
+    const resolve = registerPreviewRef.current;
+    registerPreviewRef.current = null;
+    setRegisterPreview(null);
+    resolve?.(apply);
+  };
+
   const handleImportMathCSV = async (csvText: string) => {
+    if (registerPreviewRef.current) return;
     try {
+      const staged: any[] = [];
+      const unmatched: string[] = [];
       const parsedRecords = parseMathRegisterCSV(csvText);
       if (parsedRecords.length === 0) {
         throw new Error("No s'han trobat files d'alumnes vàlides al registre de matemàtiques.");
@@ -345,8 +453,6 @@ const App: React.FC = () => {
       if (!targetGroup) {
         targetGroup = { id: 'G_4B', name: '4t B' };
         currentGroups = [...currentGroups, targetGroup];
-        setGroups(currentGroups);
-        localStorage.setItem('evaluo_groups', JSON.stringify(currentGroups));
       }
 
       const allDbStudents = await db.students.toArray();
@@ -401,7 +507,7 @@ const App: React.FC = () => {
             }
           };
 
-          await db.students.put(JSON.parse(JSON.stringify(updatedStudent)));
+          staged.push(JSON.parse(JSON.stringify(updatedStudent)));
           updatedCount++;
         } else {
           // Si és un alumne nou, el creem
@@ -426,12 +532,15 @@ const App: React.FC = () => {
             state: { status: 'idle', generatedReport: '' }
           }, targetTrimester);
 
-          await db.students.put(JSON.parse(JSON.stringify(newStudent)));
+          staged.push(JSON.parse(JSON.stringify(newStudent)));
           createdCount++;
         }
       }
 
       // Recarreguem la llista d'alumnes sincronitzada
+      if (!(await applyRegisterPreview('Matemàtiques', staged, allDbStudents, unmatched))) return;
+      setGroups(currentGroups);
+      localStorage.setItem('evaluo_groups', JSON.stringify(currentGroups));
       const refreshed = await db.students.toArray();
       const sorted = refreshed.map(s => createStudent(s, selectedTrimester)).sort((a, b) => (a.info.order || 0) - (b.info.order || 0));
       setStudents(sorted);
@@ -452,7 +561,10 @@ const App: React.FC = () => {
   };
 
   const handleImportEspaisFile = async (fileData: ArrayBuffer) => {
+    if (registerPreviewRef.current) return;
     try {
+      const staged: any[] = [];
+      const unmatched: string[] = [];
       const result = parseEspaisRegister(fileData);
       if (result.detectedRoundsCount === 0) {
         setImportNotification({
@@ -507,7 +619,7 @@ const App: React.FC = () => {
                 groupId: round.groupId
               }
             };
-            await db.students.put(JSON.parse(JSON.stringify(updatedStudent)));
+            staged.push(JSON.parse(JSON.stringify(updatedStudent)));
             updatedCount++;
           } else {
             const newStudent = createStudent({
@@ -532,12 +644,13 @@ const App: React.FC = () => {
               state: { status: 'idle', generatedReport: '' }
             }, selectedTrimester);
 
-            await db.students.put(JSON.parse(JSON.stringify(newStudent)));
+            staged.push(JSON.parse(JSON.stringify(newStudent)));
             createdCount++;
           }
         }
       }
 
+      if (!(await applyRegisterPreview('Planeta Blau', staged, allDbStudents, unmatched))) return;
       setGroups(currentGroups);
       localStorage.setItem('evaluo_groups', JSON.stringify(currentGroups));
 
@@ -567,7 +680,10 @@ const App: React.FC = () => {
   };
 
   const handleImportConferenceFile = async (fileData: ArrayBuffer | string) => {
+    if (registerPreviewRef.current) return;
     try {
+      const staged: any[] = [];
+      const unmatched: string[] = [];
       const result = parseConferenceRegister(fileData);
       if (result.records.length === 0) {
         throw new Error("No s'han trobat files d'alumnes vàlides al registre de conferències.");
@@ -615,7 +731,7 @@ const App: React.FC = () => {
             }
           };
 
-          await db.students.put(JSON.parse(JSON.stringify(updatedStudent)));
+          staged.push(JSON.parse(JSON.stringify(updatedStudent)));
           updatedCount++;
         } else {
           const newStudent = createStudent({
@@ -648,11 +764,12 @@ const App: React.FC = () => {
             state: { status: 'idle', generatedReport: '' }
           }, selectedTrimester);
 
-          await db.students.put(JSON.parse(JSON.stringify(newStudent)));
+          staged.push(JSON.parse(JSON.stringify(newStudent)));
           createdCount++;
         }
       }
 
+      if (!(await applyRegisterPreview('Conferències', staged, allDbStudents, unmatched))) return;
       const refreshed = await db.students.toArray();
       const sorted = refreshed.map(s => createStudent(s, selectedTrimester)).sort((a, b) => (a.info.order || 0) - (b.info.order || 0));
       setStudents(sorted);
@@ -673,7 +790,10 @@ const App: React.FC = () => {
   };
 
   const handleImportReadingFile = async (file: File) => {
+    if (registerPreviewRef.current) return;
     try {
+      const staged: any[] = [];
+      const unmatched: string[] = [];
       const result = await parseReadingDocument(file);
       if (!result.records || result.records.length === 0) {
         throw new Error("No s'han trobat files d'alumnes vàlides al document de velocitat lectora.");
@@ -733,11 +853,12 @@ const App: React.FC = () => {
             }
           };
 
-          await db.students.put(JSON.parse(JSON.stringify(updatedStudent)));
+          staged.push(JSON.parse(JSON.stringify(updatedStudent)));
           updatedCount++;
-        }
+        } else { unmatched.push(rec.name); }
       }
 
+      if (!(await applyRegisterPreview('Velocitat lectora', staged, allDbStudents, unmatched))) return;
       const refreshed = await db.students.toArray();
       const sorted = refreshed.map(s => createStudent(s, selectedTrimester)).sort((a, b) => (a.info.order || 0) - (b.info.order || 0));
       setStudents(sorted);
@@ -850,13 +971,33 @@ const App: React.FC = () => {
 
       const updatedStudent = createStudent(mergedData, selectedTrimester);
       const cleanStudent = JSON.parse(JSON.stringify(updatedStudent));
+      const photoChanged = oldStudent.info?.photoUrl !== updatedStudent.info.photoUrl ||
+        JSON.stringify(oldStudent.info?.photoCrop) !== JSON.stringify(updatedStudent.info.photoCrop);
+      const related = new Set<string>();
+      if (photoChanged) {
+        const identities = studentMemberships(currentList, groups);
+        const identity = identities.get(String(id));
+        for (const [member, key] of identities) {
+          if (key === identity && member !== String(id)) related.add(member);
+        }
+      }
+      const photoUrl = updatedStudent.info.photoUrl;
+      const photoCrop = updatedStudent.info.photoCrop;
 
       // 1. Persistència real i comprovada a la base de dades
-      await db.students.put(cleanStudent);
+      await db.transaction('rw', db.students, async () => {
+        await db.students.put(cleanStudent);
+        for (const member of currentList) if (related.has(String(member.id))) {
+          await db.students.update(member.id, { 'info.photoUrl': photoUrl, 'info.photoCrop': photoCrop });
+        }
+      });
 
       // 2. Sincronització immediata del ref i de l'estat de React
-      studentsRef.current = studentsRef.current.map(s => String(s.id) === String(id) ? updatedStudent : s);
-      setStudents(prev => prev.map(s => String(s.id) === String(id) ? updatedStudent : s));
+      const updateRecords = (list: typeof currentList) => list.map(student => String(student.id) === String(id)
+        ? updatedStudent : related.has(String(student.id))
+          ? { ...student, info: { ...student.info, photoUrl, photoCrop } } : student);
+      studentsRef.current = updateRecords(studentsRef.current);
+      setStudents(updateRecords);
 
       return updatedStudent;
     });
@@ -869,7 +1010,7 @@ const App: React.FC = () => {
     });
 
     return task;
-  }, [selectedTrimester]);
+  }, [selectedTrimester, groups]);
 
   const handleRemoveStudentGlobal = useCallback(async (id: string) => {
     if (!id) return;
@@ -1169,6 +1310,10 @@ const App: React.FC = () => {
                         >
                             Individual
                         </button>
+                        <button type="button" onClick={() => { setViewMode('organitzacio'); setSelectedStudentId(null); }}
+                            className={`px-3.5 h-7 rounded-lg text-[9px] font-black uppercase transition-all ${viewMode === 'organitzacio' ? 'bg-white text-primary-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
+                            Organització
+                        </button>
                     </div>
 
                     <div className="h-5 w-px bg-warm-200 shrink-0" />
@@ -1359,6 +1504,26 @@ const App: React.FC = () => {
                 </div>
             ) : (
                 <div className="w-full h-full flex flex-col">
+                    {viewMode === 'organitzacio' && (
+                        <ClassroomStudio students={students} groups={groups} activeGroupId={activeGroupId}
+                            trimester={selectedTrimester}
+                            peRubricAvailable={getRubricsForTrimester(selectedTrimester).some(rubric =>
+                              rubric.id === 'ambit_fisica' && rubric.data.some(item => item.id === 'ef_habits'))}
+                            onApplyPEEvidence={async entries => {
+                              for (const entry of entries) {
+                                const student = studentsRef.current.find(item => String(item.id) === entry.id);
+                                if (!student) throw new Error('Perfil no disponible');
+                                const nuances = student.content?.nuances || {};
+                                if (!(await handleUpdateStudentField(entry.id, { content: { nuances: {
+                                  ...nuances, ef_habits: mergeClothingEvidence(nuances.ef_habits, entry.text),
+                                } } }))) throw new Error('Perfil no disponible');
+                              }
+                            }}
+                            onImportPhotos={() => setShowDriveModal(true)}
+                            onImportFiles={(files, groupId) => handleUploadLocalPhotos(files, files.length ? [] : ['No hi ha fotos compatibles a la carpeta.'], groupId)}
+                            onUpdateSupportRole={(id, supportRole) => handleUpdateStudentField(id, { info: { supportRole } })}
+                            onUpdatePhoto={(id, photo) => handleUpdateStudentField(id, { info: photo })} />
+                    )}
                     <div className={viewMode === 'aula' ? 'flex-1 flex flex-col overflow-hidden' : 'hidden'}>
                         <BatchMode 
                             students={students} 
@@ -1452,6 +1617,31 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {registerPreview && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-900/60 p-4">
+          <section role="dialog" aria-modal="true" aria-labelledby="register-preview-title"
+            className="max-h-[90vh] w-full max-w-lg space-y-4 overflow-auto rounded-2xl bg-white p-5 shadow-xl">
+            <h2 id="register-preview-title" className="text-lg font-bold">Revisa la importació · {registerPreview.title}</h2>
+            <p className="text-sm text-slate-600">En aplicar-la, els valors del registre s’actualitzaran als perfils indicats.</p>
+            {[
+              ['Perfils amb dades que canviaran', registerPreview.updated],
+              ['Perfils nous', registerPreview.created],
+              ['Sense coincidència', registerPreview.unmatched],
+            ].map(([label, names]: [string, string[]]) => (
+              <details key={label} className="rounded-lg border border-warm-200 p-3">
+                <summary className="cursor-pointer font-semibold">{label} ({names.length})</summary>
+                {names.length > 0 && <ul className="ml-4 mt-2 list-disc text-sm">{names.map((name, index) => <li key={index}>{name}</li>)}</ul>}
+              </details>
+            ))}
+            <div className="flex justify-end gap-3">
+              <button type="button" onClick={() => finishRegisterPreview(false)}>Cancel·la</button>
+              <button type="button" onClick={() => finishRegisterPreview(true)}
+                className="rounded-xl bg-primary-900 px-4 py-2 text-sm font-bold text-white">Aplica la importació</button>
+            </div>
+          </section>
+        </div>
+      )}
+
       {photoReview && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4">
           <section role="dialog" aria-modal="true" aria-labelledby="photo-review-title"
@@ -1460,13 +1650,45 @@ const App: React.FC = () => {
             <p className="mb-4 mt-1 text-sm text-slate-600">
               Revisa els perfils preseleccionats o tria’ls manualment. En confirmar, les fotos noves substitueixen les existents.
             </p>
+            <details className="mb-3 rounded-lg border border-warm-200 bg-warm-50 p-3" open={photoReview.rows.some(row => !row.choice)}>
+              <summary className="cursor-pointer text-sm font-semibold">
+                Fotos sense assignar ({photoReview.rows.filter(row => !row.choice).length}) · Alumnes pendents
+              </summary>
+              <p className="mt-1 text-xs text-slate-600">Arrossega una foto a un perfil sense foto per assignar-la.</p>
+              <div className="mt-2 flex max-h-32 flex-wrap gap-2 overflow-auto">
+                {photoReview.roster.filter(student => !student.hasPhoto &&
+                  !photoReview.rows.some(row => row.choice === student.id) &&
+                  photoReview.rows.some(row => (!row.groupCode || row.groupCode === student.groupCode) &&
+                    (!row.planetRound || row.planetRound === student.planetRound))).map(student => (
+                  <span key={student.id} onDragOver={event => event.preventDefault()} onDrop={event => {
+                    event.preventDefault();
+                    const payload = event.dataTransfer.getData('text/x-evaluo-photo');
+                    if (!payload) return;
+                    const index = Number(payload);
+                    setPhotoReview(current => {
+                      const row = current?.rows[index];
+                      if (!current || !row || (row.groupCode && row.groupCode !== student.groupCode) ||
+                        (row.planetRound && row.planetRound !== student.planetRound) ||
+                        current.rows.some(item => current.roster.find(profile => profile.id === item.choice)?.identity === student.identity)) return current;
+                      return { ...current, rows: current.rows.map((item, i) => i === index ? {
+                        ...item, choice: student.id,
+                      } : item) };
+                    });
+                  }} className="rounded-lg border border-dashed border-warm-400 bg-white px-2 py-1 text-xs">
+                    {student.name} · {student.group}
+                  </span>
+                ))}
+              </div>
+            </details>
             {photoReview.errors.length > 0 && (
               <p className="mb-3 whitespace-pre-line text-sm text-amber-800">{photoReview.errors.join('\n')}</p>
             )}
             <div className="space-y-3 overflow-y-auto">
               {photoReview.rows.map((row, index) => (
                 <div key={index} className="flex items-center gap-3 rounded-xl border border-warm-200 p-3">
-                  <img src={row.url} alt="" className="h-20 w-20 shrink-0 rounded-lg bg-warm-50 object-contain" />
+                  <img src={row.url} alt={row.label} draggable onDragStart={event =>
+                    event.dataTransfer.setData('text/x-evaluo-photo', String(index))}
+                    className="h-20 w-20 shrink-0 cursor-grab rounded-lg bg-warm-50 object-contain" />
                   <div className="min-w-0 flex-1 text-sm font-semibold text-slate-700">
                     {row.label}
                     {row.groupCode && (
@@ -1487,8 +1709,30 @@ const App: React.FC = () => {
                             (!row.groupCode || student.groupCode === row.groupCode) &&
                             (!row.planetRound || student.planetRound === row.planetRound))
                           ? 'No hi ha alumnes que coincideixin amb el grup o la ronda del fitxer.'
-                          : 'Cap coincidència pel nom. Pots triar un perfil manualment.'}
+                          : row.otherGroups?.length
+                            ? 'Coincidència fora del grup del fitxer: ' + row.otherGroups.join(', ') + '. Revisa la carpeta de la foto.'
+                            : 'Cap coincidència pel nom. Pots triar un perfil manualment.'}
                     </span>
+                    {row.ids.length > 1 && (
+                      <span className="mt-1 block text-xs font-medium text-amber-800">
+                        Revisa la selecció · {row.ids.length} alumnes coincideixen.
+                      </span>
+                    )}
+                    {row.possibleTypo && (
+                      <span className="mt-1 block text-xs font-medium text-amber-800">
+                        Possible error tipogràfic · comprova el nom abans de confirmar.
+                      </span>
+                    )}
+                    {row.lastMissing && (
+                      <span className="mt-1 block text-xs font-medium text-amber-800">
+                        És l’únic perfil sense foto del grup seleccionat. Revisa’l abans de confirmar.
+                      </span>
+                    )}
+                    {row.ids.length > 0 && !row.choice && photoReview.rows.some(item => row.ids.includes(item.choice)) && (
+                      <span className="mt-1 block text-xs font-medium text-amber-800">
+                        Un dels perfils coincideix amb una altra foto. Revisa les dues seleccions.
+                      </span>
+                    )}
                     <select value={row.choice} aria-label={'Perfil per a ' + row.label} disabled={isUploadingPhotos}
                       className="mt-1 block w-full rounded-lg border border-warm-200 bg-white p-2 font-normal"
                       onChange={event => {
@@ -1500,10 +1744,12 @@ const App: React.FC = () => {
                       }}>
                       <option value="">Deixa sense assignar</option>
                       {photoReview.roster.filter(student =>
+                        (!row.ids.length || row.ids.includes(student.id) || row.choice === student.id) &&
                         (!row.groupCode || student.groupCode === row.groupCode) &&
                         (!row.planetRound || student.planetRound === row.planetRound)).map(student => {
                         const suggested = row.ids.includes(student.id);
-                        const chosenElsewhere = photoReview.rows.some((item, i) => i !== index && item.choice === student.id);
+                        const chosenElsewhere = photoReview.rows.some((item, i) => i !== index &&
+                          photoReview.roster.find(profile => profile.id === item.choice)?.identity === student.identity);
                         return (
                           <option key={student.id} value={student.id} disabled={chosenElsewhere}>
                             {suggested ? 'Suggeriment: ' : ''}{student.name}{student.group ? ' · ' + student.group : ''}{student.hasPhoto ? ' (substitueix la foto)' : ''}
@@ -1596,6 +1842,21 @@ const App: React.FC = () => {
                       accept=".png,.jpg,.jpeg,.webp,.gif,.bmp,.docx,.doc,.odt,.zip" 
                       className="hidden" 
                     />
+                    <input type="file" multiple className="hidden"
+                      ref={node => {
+                        folderInputPhotosRef.current = node;
+                        node?.setAttribute('webkitdirectory', '');
+                      }}
+                      onChange={event => {
+                        const files = Array.from<File>(event.currentTarget.files || []).filter(file =>
+                          /\.(png|jpe?g|webp|gif|bmp|docx?|odt|zip)$/i.test(file.name));
+                        void handleUploadLocalPhotos(files, files.length ? [] : ['No hi ha fotos compatibles a la carpeta.']);
+                        event.currentTarget.value = '';
+                      }} />
+                    <button type="button" onClick={() => folderInputPhotosRef.current?.click()}
+                      className="mr-2 rounded-xl bg-primary-900 px-4 py-2 text-xs font-bold text-white">
+                      Selecciona una carpeta
+                    </button>
                     <button 
                       onClick={() => fileInputLocalPhotosRef.current?.click()}
                       className="px-6 py-2.5 bg-primary-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all shadow-md inline-flex items-center gap-2"

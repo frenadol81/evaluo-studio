@@ -67,6 +67,8 @@ export interface BatchStudent {
     order?: number;
     groupId?: string;
     photoUrl?: string;
+      photoCrop?: PhotoCrop;
+      supportRole?: import('./infrastructure/services/classroomGrouping').SupportRole;
   };
   metrics: {
     readingSpeed: number;
@@ -121,3 +123,9 @@ export interface ClassGroup {
         comprehension?: string;
     };
 }
+export interface PhotoCrop {
+    x: number;
+    y: number;
+    zoom: number;
+}
+
