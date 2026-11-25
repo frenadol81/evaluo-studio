@@ -1,7 +1,10 @@
+import { MATH_REPORT_WRITING_RULES } from '../../reportWritingRules.js';
+
 export const RUBRIC_MATEMATIC_T1 = {
   id: 'ambit_matematic',
   title: 'Àmbit Matemàtic',
   inputType: 'GRID_4_LEVELS',
+  writingRules: MATH_REPORT_WRITING_RULES,
   levels: ['Inici', 'En progrés', 'Assolit', 'Avançat'],
   data: [
     {

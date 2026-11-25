@@ -89,6 +89,7 @@ export interface BatchStudent {
     maker?: { narrative?: string };
     planetaBlau?: { narrative?: string };
     conference?: any;
+    mathRegister?: { schema: string; status: string; version: string; evidence: string; draft: string } | null;
     reading?: {
       wpm: number;
       levelTag?: string;

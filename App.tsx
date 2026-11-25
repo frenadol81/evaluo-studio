@@ -381,11 +381,12 @@ const App: React.FC = () => {
           // Filtrem qualsevol opció prèvia de matemàtiques que pogués tenir
           const cleanTags = existingTags.filter(t => !rec.tags.some(newTag => newTag === t));
           const mergedTags = [...cleanTags, ...rec.tags];
+          const mathPatch = rec.mathRegister ? { mathRegister: rec.mathRegister } : {};
 
           const updatedStudent = {
             ...existing,
             content: targetTrimester === selectedTrimester 
-              ? { ...existing.content, tags: [...(existing.content?.tags || []).filter(t => !rec.tags.includes(t)), ...rec.tags] }
+              ? { ...existing.content, tags: [...(existing.content?.tags || []).filter(t => !rec.tags.includes(t)), ...rec.tags], ...mathPatch }
               : existing.content,
             trimesters: {
               ...trimesters,
@@ -393,7 +394,8 @@ const App: React.FC = () => {
                 ...t1Data,
                 content: {
                   ...(t1Data.content || {}),
-                  tags: mergedTags
+                  tags: mergedTags,
+                  ...mathPatch
                 }
               }
             }
@@ -415,6 +417,7 @@ const App: React.FC = () => {
             },
             content: {
               tags: rec.tags,
+              ...(rec.mathRegister ? { mathRegister: rec.mathRegister } : {}),
               nuances: {},
               anecdote: '',
               manualObservations: [],
@@ -1199,15 +1202,25 @@ const App: React.FC = () => {
                             reader.readAsText(file);
                         }
                     }} />
-                    <input type="file" ref={fileInputExcelRef} className="hidden" accept=".csv,.txt" onChange={(e) => {
+                    <input type="file" ref={fileInputExcelRef} className="hidden" accept=".xlsx,.xls,.csv,.txt" onChange={async (e) => {
                         const file = e.target.files?.[0];
-                        if (file) {
-                            const reader = new FileReader();
-                            reader.onload = (ev) => {
-                                const text = ev.target?.result as string;
-                                if (text) handleImportMathCSV(text);
-                            };
-                            reader.readAsText(file);
+                        e.currentTarget.value = '';
+                        if (!file) return;
+                        try {
+                            let csv: string;
+                            if (/\.(xlsx|xls)$/i.test(file.name)) {
+                                const XLSX = await import('xlsx');
+                                const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+                                const name = workbook.SheetNames.find(n => n.trim() === 'Export Evalua Studio') || workbook.SheetNames.find(n => n.trim() === 'Registre Tram 1');
+                                if (!name) throw new Error("No s'ha trobat la pestanya Export Evalua Studio ni Registre Tram 1.");
+                                csv = XLSX.utils.sheet_to_csv(workbook.Sheets[name]);
+                            } else {
+                                csv = await file.text();
+                            }
+                            await handleImportMathCSV(csv);
+                        } catch (err: any) {
+                            setImportNotification({ type: 'error', message: `Error en llegir el registre de matemàtiques: ${err.message}` });
+                            setTimeout(() => setImportNotification(null), 6000);
                         }
                     }} />
                     <input type="file" ref={fileInputEspaisRef} className="hidden" accept=".xlsx,.xls,.csv,.tsv,.txt" onChange={(e) => {

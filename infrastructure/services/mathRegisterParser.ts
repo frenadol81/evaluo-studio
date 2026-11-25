@@ -1,21 +1,19 @@
 import { RUBRIC_MATEMATIC_T1 } from '../../core/config/rubrics/T1/06_matematic.js';
+import { parseCsvRows, parseMathExportRows } from './mathRegisterExport.js';
 
 export interface ParsedMathRecord {
   num: number;
   name: string;
   rawName: string;
-  levels: {
-    numeracio: number;
-    calcul: number;
-    problemes: number;
-    geometria: number;
-  };
+  levels: Partial<{ numeracio: number; calcul: number; problemes: number; geometria: number }>;
+  mathRegister?: { schema: string; status: string; version: string; evidence: string; draft: string };
   tags: string[];
 }
 
-function parseNum(val: string | undefined): number {
-  if (!val) return 0;
-  return parseFloat(val.replace(',', '.').trim()) || 0;
+function parseNum(val: string | undefined): number | null {
+  if (val == null || !val.trim()) return null;
+  const n = Number(val.replace(',', '.').trim());
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 function toLevel(ratio: number): number {
@@ -30,7 +28,9 @@ function toLevel(ratio: number): number {
  * Extrau automàticament els alumnes, puntuacions de tasques i assigna els tags de la rúbrica oficial de T1.
  */
 export function parseMathRegisterCSV(csvContent: string): ParsedMathRecord[] {
-  const lines = csvContent.split('\n');
+  const rows = parseCsvRows(csvContent);
+  const structured = parseMathExportRows(rows);
+  if (structured !== null) return structured as ParsedMathRecord[];
   const results: ParsedMathRecord[] = [];
 
   const c1 = RUBRIC_MATEMATIC_T1.data[0].options;
@@ -38,38 +38,12 @@ export function parseMathRegisterCSV(csvContent: string): ParsedMathRecord[] {
   const c3 = RUBRIC_MATEMATIC_T1.data[2].options;
   const c4 = RUBRIC_MATEMATIC_T1.data[3].options;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    
-    // Cerquem les línies d'alumnes que comencen per número (ex: 1,"Ahmed Shahzadi, Hooria",...)
-    const match = line.match(/^(\d+),\"([^\"]+)\"/);
-    if (!match) continue;
-
-    const num = parseInt(match[1], 10);
-    const raw = match[2];
+  for (const cols of rows) {
+    const num = Number(cols[0]);
+    const raw = (cols[1] || '').trim();
+    if (!Number.isInteger(num) || num <= 0 || !raw) continue;
     const parts = raw.split(',').map(s => s.trim());
-    let name = raw;
-    if (parts.length === 2) {
-      name = `${parts[1]} ${parts[0]}`;
-    }
-
-    // Parse CSV line amb cometes
-    const cols: string[] = [];
-    let cur = '';
-    let inQ = false;
-    for (let c = 0; c < line.length; c++) {
-      const ch = line[c];
-      if (ch === '\"') {
-        inQ = !inQ;
-      } else if (ch === ',' && !inQ) {
-        cols.push(cur.trim());
-        cur = '';
-      } else {
-        cur += ch;
-      }
-    }
-    cols.push(cur.trim());
+    const name = parts.length === 2 ? `${parts[1]} ${parts[0]}` : raw;
 
     // Índexs de les tasques segons la capçalera del model:
     // Tasca 1 /2 (cols[18]), Tasca 2 /2 (cols[19]), Tasca 3 /3 (cols[20]),
@@ -83,35 +57,22 @@ export function parseMathRegisterCSV(csvContent: string): ParsedMathRecord[] {
     const t6 = parseNum(cols[23]);
     const calcul = parseNum(cols[35]);
 
-    // Pesos competencials de la rúbrica de T1:
-    // 1. Numeració i sentit numèric: T1 (/2) + T2 (/2) -> total /4
-    const numRatio = (t1 + t2) / 4;
-    // 2. Càlcul i relacions multiplicatives: T3 (/3) + Càlcul (/2) -> total /5
-    const calcRatio = (t3 + calcul) / 5;
-    // 3. Resolució de problemes i raonament: T4 (/2) -> total /2
-    const probRatio = t4 / 2;
-    // 4. Geometria i raonament espacial: T5 (/3) + T6 (/2) -> total /5
-    const geoRatio = (t5 + t6) / 5;
-
-    const lvl1 = toLevel(numRatio);
-    const lvl2 = toLevel(calcRatio);
-    const lvl3 = toLevel(probRatio);
-    const lvl4 = toLevel(geoRatio);
-
-    const tags = [c1[lvl1], c2[lvl2], c3[lvl3], c4[lvl4]];
-
-    results.push({
-      num,
-      name,
-      rawName: raw,
-      levels: {
-        numeracio: lvl1,
-        calcul: lvl2,
-        problemes: lvl3,
-        geometria: lvl4
-      },
-      tags
-    });
+    // Compatibilitat amb el registre antic: mai convertir absències en zeros.
+    const levels: ParsedMathRecord['levels'] = {};
+    const tags: string[] = [];
+    if (t1 !== null && t2 !== null && t1 <= 2 && t2 <= 2) {
+      levels.numeracio = toLevel((t1 + t2) / 4); tags.push(c1[levels.numeracio]);
+    }
+    if (t3 !== null && calcul !== null && t3 <= 3 && calcul <= 2) {
+      levels.calcul = toLevel((t3 + calcul) / 5); tags.push(c2[levels.calcul]);
+    }
+    if (t4 !== null && t4 <= 2) {
+      levels.problemes = toLevel(t4 / 2); tags.push(c3[levels.problemes]);
+    }
+    if (t5 !== null && t6 !== null && t5 <= 3 && t6 <= 2) {
+      levels.geometria = toLevel((t5 + t6) / 5); tags.push(c4[levels.geometria]);
+    }
+    if (tags.length) results.push({ num, name, rawName: raw, levels, tags });
   }
 
   return results;

@@ -93,7 +93,7 @@ L'informe s'ha de construir seguint estrictament aquest ordre lògic, sense llis
 - **SENSE TÍTOLS NI INTRODUCCIONS:** Està totalment prohibit incloure títols (ex: "Informe de la Maria"), encapçalaments o paràgrafs d'introducció genèrics. L'informe comença directament amb la descripció de l'alumne/a.
 - PARÀGRAF 1: L'ESSÈNCIA (Temperament i Actitud Vital). Basat en els Adjectius de Personalitat.
 - PARÀGRAF 2: LA DINÀMICA (Hàbits i Convivència). Mecànica a l'aula, organització, autonomia i relació amb companys.
-- PARÀGRAFS 3 a N: ELS RESULTATS (Àmbits Acadèmics). Un paràgraf independent per a cada àrea (Llengua, Mates, etc.).
+- PARÀGRAFS 3 a N: ELS RESULTATS (Àmbits Acadèmics). Un bloc independent per a cada àrea, amb diversos paràgrafs temàtics quan aportin claredat, especialment a matemàtiques. Omet les àrees sense evidències.
 
 3. INSTRUCCIONS TÈCNIQUES: REDACCIÓ DEL BLOC DE PERSONALITAT
 - NO LLISTIS ELS ADJECTIUS. Utilitza la seva definició operativa per descriure comportaments observables.

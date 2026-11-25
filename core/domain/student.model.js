@@ -70,7 +70,8 @@ export const createStudent = (raw = {}, trimesterId = 2) => {
         maker: { narrative: raw.content?.maker?.narrative || raw.makerNarrative || "" },
         planetaBlau: { narrative: raw.content?.planetaBlau?.narrative || raw.planetaBlauNarrative || "" },
         conference: raw.content?.conference || null,
-        reading: raw.content?.reading || null
+        reading: raw.content?.reading || null,
+        mathRegister: raw.content?.mathRegister || null
       },
       state: {
         status: raw.state?.status || raw.status || (raw.generatedReport || raw.state?.generatedReport ? 'completed' : 'idle'),
@@ -101,7 +102,8 @@ export const createStudent = (raw = {}, trimesterId = 2) => {
       maker: { narrative: "" },
       planetaBlau: { narrative: "" },
       conference: null,
-      reading: null
+      reading: null,
+      mathRegister: null
     },
     state: {
       status: 'idle',
