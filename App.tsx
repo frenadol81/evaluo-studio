@@ -4,6 +4,7 @@ import { matchStudentPhotos, photoGroupCodes, photoPlanetRound, preselectPhotoPr
 import { MainForm } from './ui/modules/ReportGenerator/MainForm';
 import { ProfileSelector } from './ui/components/ProfileSelector';
 import { BatchMode } from './components/BatchMode';
+import { AiSettings } from './components/AiSettings';
 import { ClassroomStudio } from './components/ClassroomStudio';
 import { mergeClothingEvidence } from './infrastructure/services/peClothing';
 import { studentMemberships, withSharedStudentPhotos } from './infrastructure/services/studentMemberships';
@@ -114,6 +115,7 @@ const App: React.FC = () => {
   const [showNewClassModal, setShowNewClassModal] = useState(false);
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showAiSettings, setShowAiSettings] = useState(false);
   const [showDeleteClassConfirm, setShowDeleteClassConfirm] = useState<string | null>(null);
   const [showDriveModal, setShowDriveModal] = useState(false);
   const [driveFolderId, setDriveFolderId] = useState(localStorage.getItem('evaluo_drive_folder_id') ||
@@ -1585,6 +1587,18 @@ const App: React.FC = () => {
         </div>
       )}
 
+      <button
+        type="button"
+        onClick={() => setShowAiSettings(true)}
+        aria-label="Configuració d’IA"
+        aria-haspopup="dialog"
+        aria-expanded={showAiSettings}
+        title="Configuració d’IA"
+        className="no-print fixed bottom-4 left-4 z-[70] grid h-12 w-12 place-items-center rounded-full border border-warm-300 bg-primary-900 text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-black hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary-900 motion-reduce:transition-none"
+      >
+        <Sparkles className="h-6 w-6" aria-hidden="true" />
+      </button>
+      {showAiSettings && <AiSettings onClose={() => setShowAiSettings(false)} />}
       {showResetConfirm && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-red-900/60 backdrop-blur-md animate-fade-in">
             <div className="bg-white rounded-[3rem] p-12 max-w-lg w-full text-center shadow-2xl">

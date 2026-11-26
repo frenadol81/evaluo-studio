@@ -28,14 +28,15 @@ export const generateReport = async (config: ReportConfig): Promise<string> => {
   return data.text;
 };
 
-export const getTextVariations = async (selectedText: string, instruction: string, fullContext: string): Promise<string[]> => {
+export const getTextVariations = async (selectedText: string, instruction: string, fullContext: string, signal?: AbortSignal): Promise<string[]> => {
   const response = await fetch("/api/gemini/variations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ selectedText, instruction, fullContext }),
+    signal,
   });
   const data = await response.json();
-  if (data.error) throw new Error(data.error);
+  if (!response.ok || data.error) throw new Error(data.error || 'No s’han pogut obtenir alternatives.');
   return data.variations || [];
 };
 

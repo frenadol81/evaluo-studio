@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
+import { existsSync } from "node:fs";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
@@ -15,6 +16,10 @@ import { buildReportPrompt } from "./infrastructure/api/promptBuilder.js";
 import { SYSTEM_INSTRUCTION, MAKER_SYSTEM_INSTRUCTION, PLANETA_BLAU_SYSTEM_INSTRUCTION, PLANETA_BLAU_INITIAL_PHRASE, PLANETA_BLAU_FINAL_PHRASE } from "./constants";
 import { getRubricsForTrimester } from "./core/config/rubrics/index.js";
 import { parseReadingRows, parseReadingPlainText } from "./infrastructure/services/readingRegisterParser";
+import { generateOpenAiText } from "./infrastructure/api/openAiText";
+import { registerLocalAiSettings } from "./infrastructure/api/localAiSettings";
+
+if (existsSync(".env.local")) process.loadEnvFile(".env.local");
 
 const REPORT_FLOW_GUIDANCE = `PAUTA DE FLUÏDESA NARRATIVA
 - Quan coincideixin una fortalesa i una necessitat de suport, concreta en quines accions es manifesta cadascuna. Per exemple, si les dades ho indiquen, distingeix entre l'autonomia per seguir les fases o fer les tasques del rol i l'acompanyament per implicar-se, mantenir l'esforç o col·laborar amb els companys.
@@ -89,18 +94,18 @@ async function startServer() {
   const jsonParser = express.json({ limit: '500kb' });
   // Higher payload limit dedicated solely to audio transcription (10mb)
   const audioParser = express.json({ limit: '10mb' });
+  const aiSettings = registerLocalAiSettings(app, express.json({ limit: '2kb' }));
 
   // Apply rate limiter and default parser to API routes
   app.use('/api/gemini', rateLimiter());
 
   // Shared Gemini client on the server
   let aiClient: any = null;
+  let aiClientKey: string | undefined;
   const getAi = () => {
-    if (!aiClient) {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        throw new Error("GEMINI_API_KEY is not set in environment variables.");
-      }
+    const apiKey = aiSettings.key("gemini");
+    if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
+    if (!aiClient || apiKey !== aiClientKey) {
       aiClient = new GoogleGenAI({
         apiKey: apiKey,
         httpOptions: {
@@ -109,6 +114,7 @@ async function startServer() {
           }
         }
       });
+      aiClientKey = apiKey;
     }
     return aiClient;
   };
@@ -116,23 +122,28 @@ async function startServer() {
   const classifyGeminiError = (error: any) => {
     const msg = error.message || String(error);
     const status = error.status || error.statusCode;
+    if (/^(?:GEMINI|OPENAI)_API_KEY is not set/.test(msg)) {
+      const provider = msg.startsWith("OPENAI") ? "OpenAI" : "Gemini";
+      return { status: 503, code: "MISSING_API_KEY", message: `Configura la clau de ${provider} al menú IA de l’aplicació.` };
+    }
+    const provider = msg.startsWith("OpenAI") ? "OpenAI" : "Gemini";
     if (status === 401 || msg.includes("API_KEY_INVALID") || msg.includes("401")) {
-      return { status: 401, code: "INVALID_KEY", message: "La clau d'API de Gemini no és vàlida o ha caducat." };
+      return { status: 401, code: "INVALID_KEY", message: `La clau d'API de ${provider} no és vàlida o ha caducat.` };
     }
     if (status === 403 || msg.includes("PERMISSION_DENIED") || msg.includes("403")) {
       return { status: 403, code: "PERMISSION_DENIED", message: "No es disposa de permisos suficients per accedir a aquest model." };
     }
     if (status === 404 || msg.includes("NOT_FOUND") || msg.includes("404")) {
-      return { status: 404, code: "NOT_FOUND", message: "El model de Gemini sol·licitat no s'ha trobat o no està disponible." };
+      return { status: 404, code: "NOT_FOUND", message: `El model de ${provider} no està disponible.` };
     }
     if (status === 503 || msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("high demand")) {
       return { status: 503, code: "UNAVAILABLE", message: "El servei d'IA té una alta demanda en aquests moments. Si us plau, torna-ho a provar en uns instants." };
     }
     if (status === 429 || msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("Quota")) {
-      return { status: 429, code: "QUOTA_EXCEEDED", message: "S'ha assolit el límit de quota de Gemini. Espera uns moments abans de continuar." };
+      return { status: 429, code: "QUOTA_EXCEEDED", message: `S'ha assolit el límit de quota de ${provider}. Revisa la quota o canvia el proveïdor al menú IA.` };
     }
     if (status === 400 || msg.includes("INVALID_ARGUMENT") || msg.includes("400")) {
-      return { status: 400, code: "INVALID_ARGUMENT", message: "La petició enviada a Gemini no té un format vàlid." };
+      return { status: 400, code: "INVALID_ARGUMENT", message: `La petició enviada a ${provider} no té un format vàlid.` };
     }
     return { status: 500, code: "SERVER_ERROR", message: "S'ha produït un error de comunicació amb el servei d'IA." };
   };
@@ -181,6 +192,9 @@ async function startServer() {
     fallbackModels?: string[];
   }): Promise<string> => {
     // Declaració explícita per complir la verificació d'arquitectura
+    if (aiSettings.provider() === "openai" && prompt && !contents) {
+      return generateOpenAiText(prompt, systemInstruction, aiSettings.key("openai"));
+    }
     const model = 'gemini-3.8-flash';
     const ai = getAi();
     const candidateModels = [primaryModel || model, ...fallbackModels];
@@ -322,7 +336,7 @@ No incloguis numeració, ni guions, ni cap text introductori ni explicacions.`;
         primaryModel: 'gemini-3.8-flash',
       });
 
-      const variations = (result || "").split("|||").map((v: any) => v.trim()).filter((v: any) => v.length > 5).slice(0, 3);
+      const variations = result.split("|||").map(value => value.trim()).filter(Boolean).slice(0, 3);
       res.json({ variations });
     } catch (error: any) {
       sendError(res, error, "/api/gemini/variations");

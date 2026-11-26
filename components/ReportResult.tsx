@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Printer, Wand2, Sparkles, Save, ArrowLeft, Feather, Zap, Loader2, Heart, Copy, Check, ShieldCheck, Library, AlertTriangle, Info, Globe, RotateCcw, RefreshCw, Wind, Undo, Redo, FileText, Trash2, LineChart, History, Plus, X } from 'lucide-react';
 import { getTextVariations, getEvolutionSuggestions, injectEvolutionPhrase } from '../services/geminiService';
+import { getLocalReportAlternatives, type ReportEditMode } from '../core/config/reportEditingAlternatives';
 import ReactMarkdown from 'react-markdown';
 
 interface ReportResultProps {
@@ -120,7 +121,8 @@ export const ReportResult: React.FC<ReportResultProps> = ({ report: initialRepor
   const hasEvolutionMarkers = useMemo(() => fullReport.includes('(evolution-highlight)'), [fullReport]);
 
   const savedRangeRef = useRef<Range | null>(null);
-  const selectionOffsetsRef = useRef<{ start: number, end: number } | null>(null);
+  const alternativesRequestRef = useRef<AbortController | null>(null);
+  const [alternativesError, setAlternativesError] = useState('');
   const manualTypingTimeoutRef = useRef<any>(null);
 
   const buildFullReport = (tabText: string, tab: 'family' | 'student' = activeTab) => {
@@ -234,8 +236,7 @@ export const ReportResult: React.FC<ReportResultProps> = ({ report: initialRepor
       if (selection && !selection.isCollapsed) {
         // Si estem esborrant una selecció, netegem l'estat d'ajust quirúrgic per evitar confusions
         // i assegurem que el contentEditable no estigui bloquejat per isRewriting
-        setActiveSelection(null);
-        setCandidates([]);
+        clearEditingSelection();
       }
     }
   };
@@ -310,106 +311,90 @@ export const ReportResult: React.FC<ReportResultProps> = ({ report: initialRepor
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const fetchAlternatives = async (instruction: string, textOverride?: string) => {
+  const fetchAlternatives = async (instruction: string, textOverride?: string, mode: ReportEditMode = 'rewrite') => {
     const targetText = textOverride || activeSelection;
     if (!targetText) return;
+    alternativesRequestRef.current?.abort();
+    const request = new AbortController();
+    alternativesRequestRef.current = request;
+    setAlternativesError('');
+    const local = getLocalReportAlternatives(targetText, mode);
+    if (mode === 'synonyms' && local.length) {
+        setCandidates(local);
+        setIsRewriting(false);
+        return;
+    }
     setIsRewriting(true);
     setCandidates([]);
     try {
-        const vars = await getTextVariations(targetText, instruction, currentText);
-        setCandidates(vars.map(v => v.replace(/^["']|["']$/g, '').trim()).slice(0, 3));
+        const context = contentEditableRef.current?.innerText || currentText;
+        const vars = await getTextVariations(targetText, instruction, context, request.signal);
+        if (request.signal.aborted) return;
+        const proposals = [...new Set(vars.map(v => v.replace(/^["']|["']$/g, '').trim()))]
+            .filter(v => v && v !== targetText).slice(0, 3);
+        setCandidates(proposals.length ? proposals : local);
+        if (!proposals.length && !local.length) setAlternativesError('No hem trobat alternatives per a aquest fragment.');
     } catch (e) {
-        console.error("Error obtenint alternatives:", e);
-    } finally { setIsRewriting(false); }
+        if (request.signal.aborted) return;
+        setCandidates(local);
+        if (!local.length) setAlternativesError(e instanceof Error ? e.message : 'No s’han pogut obtenir alternatives.');
+    } finally {
+        if (!request.signal.aborted) setIsRewriting(false);
+    }
   };
 
-  const getCaretCharacterOffsetWithin = (element: HTMLElement) => {
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) return null;
-    try {
-      const range = selection.getRangeAt(0);
-      const preCaretRange = range.cloneRange();
-      preCaretRange.selectNodeContents(element);
-      preCaretRange.setEnd(range.startContainer, range.startOffset);
-      const start = preCaretRange.toString().length;
-      const end = start + range.toString().length;
-      return { start, end };
-    } catch (e) {
-      return null;
-    }
+  const clearEditingSelection = () => {
+    alternativesRequestRef.current?.abort();
+    savedRangeRef.current = null;
+    setActiveSelection(null);
+    setCandidates([]);
+    setAlternativesError('');
+    setIsRewriting(false);
   };
 
   const handleMouseUp = () => {
     const selection = window.getSelection();
-    if (!selection || selection.isCollapsed) return;
+    if (!selection || selection.isCollapsed || !selection.rangeCount) {
+        clearEditingSelection();
+        return;
+    }
+    const range = selection.getRangeAt(0);
+    if (!contentEditableRef.current?.contains(range.commonAncestorContainer)) return;
     const text = selection.toString().trim();
     if (text.length >= 2) {
-        if (contentEditableRef.current) {
-          try {
-            savedRangeRef.current = selection.getRangeAt(0).cloneRange();
-            selectionOffsetsRef.current = getCaretCharacterOffsetWithin(contentEditableRef.current);
-          } catch (e) {
-            savedRangeRef.current = null;
-            selectionOffsetsRef.current = null;
-          }
-        }
-        setCandidates([]);
+        clearEditingSelection();
+        savedRangeRef.current = range.cloneRange();
         setActiveSelection(text);
         setOriginalSentence(text);
         setAttenuationLevel(0);
+        setSidebarTab('tuning');
+        if (/^\p{L}+(?:[’'·-]\p{L}+)*$/u.test(text)) {
+            void fetchAlternatives("Proposa tres sinònims en català que es puguin substituir directament en aquest context. Conserva la flexió i la categoria gramatical.", text, 'synonyms');
+        }
+    } else {
+        clearEditingSelection();
     }
   };
 
   const applyCandidate = (candidate: string) => {
-    if (!activeSelection) return;
-    
-    let applied = false;
-    const selection = window.getSelection();
-
-    // 1. Provar reemplaçament directe si la selecció al DOM segueix intacta
-    if (selection && !selection.isCollapsed && selection.toString().trim() === activeSelection) {
-      try {
-        const range = selection.getRangeAt(0);
-        range.deleteContents();
-        range.insertNode(document.createTextNode(candidate));
-        applied = true;
-      } catch (e) {
-        applied = false;
-      }
-    } else if (savedRangeRef.current && contentEditableRef.current && contentEditableRef.current.contains(savedRangeRef.current.commonAncestorContainer)) {
-      try {
-        savedRangeRef.current.deleteContents();
-        savedRangeRef.current.insertNode(document.createTextNode(candidate));
-        applied = true;
-      } catch (e) {
-        applied = false;
-      }
+    const editor = contentEditableRef.current;
+    const range = savedRangeRef.current;
+    if (!editor || !range || !activeSelection) return;
+    const selectedText = range.toString();
+    if (!editor.contains(range.commonAncestorContainer) || selectedText.trim() !== activeSelection) {
+        clearEditingSelection();
+        return;
     }
 
-    if (applied && contentEditableRef.current) {
-      const newText = contentEditableRef.current.innerText;
-      lastSyncedTextRef.current = newText;
-      updateCurrentText(newText);
-    } else if (selectionOffsetsRef.current && typeof selectionOffsetsRef.current.start === 'number') {
-      // 2. Substitució precisa per posició de caràcters (evita substituir la primera coincidència d'una paraula repetida)
-      const { start, end } = selectionOffsetsRef.current;
-      const textToSlice = contentEditableRef.current ? contentEditableRef.current.innerText : currentText;
-      const newText = textToSlice.slice(0, start) + candidate + textToSlice.slice(end);
-      if (contentEditableRef.current) {
-        contentEditableRef.current.innerText = newText;
-        lastSyncedTextRef.current = newText;
-      }
-      updateCurrentText(newText);
-    } else {
-      // Fallback
-      const newText = currentText.replace(activeSelection, candidate);
-      updateCurrentText(newText);
-    }
-    
-    setActiveSelection(null);
-    setCandidates([]);
-    savedRangeRef.current = null;
-    selectionOffsetsRef.current = null;
+    const leading = selectedText.match(/^\s*/)?.[0] || '';
+    const trailing = selectedText.match(/\s*$/)?.[0] || '';
+    range.deleteContents();
+    range.insertNode(document.createTextNode(leading + candidate + trailing));
+    const newText = editor.innerText;
+    lastSyncedTextRef.current = newText;
+    updateCurrentText(newText);
+    window.getSelection()?.removeAllRanges();
+    clearEditingSelection();
   };
 
   const fetchEvolution = async (force = false) => {
@@ -665,6 +650,12 @@ export const ReportResult: React.FC<ReportResultProps> = ({ report: initialRepor
                     spellCheck={false}
                     onBlur={saveCurrentToState}
                     onKeyDown={handleEditorKeyDown}
+                    onKeyUp={(event) => {
+                        if (event.key === 'Shift' || (event.shiftKey && /^(Arrow|Home|End|Page)/.test(event.key))) {
+                            const selected = window.getSelection()?.toString().trim();
+                            if (selected !== activeSelection) handleMouseUp();
+                        }
+                    }}
                     onPaste={(e) => {
                         e.preventDefault();
                         const text = e.clipboardData.getData('text/plain');
@@ -672,8 +663,7 @@ export const ReportResult: React.FC<ReportResultProps> = ({ report: initialRepor
                     }}
                     onInput={() => {
                         if (activeSelection) {
-                            setActiveSelection(null);
-                            setCandidates([]);
+                            clearEditingSelection();
                         }
                         if (manualTypingTimeoutRef.current) clearTimeout(manualTypingTimeoutRef.current);
                         manualTypingTimeoutRef.current = setTimeout(() => {
@@ -779,7 +769,7 @@ export const ReportResult: React.FC<ReportResultProps> = ({ report: initialRepor
                                                             "Transforma la frase en una descripció totalment neutra, objectiva i basada en fets, sense adjectius valoratius.",
                                                             "Reescriu la frase girant el focus: en lloc de destacar l'èxit, presenta-ho com un repte constant o un aspecte que requereix atenció/impuls."
                                                         ];
-                                                        fetchAlternatives(prompts[level]);
+                                                        fetchAlternatives(prompts[level], undefined, level === 1 ? 'soften' : level === 2 ? 'direct' : 'rewrite');
                                                     }}
                                                     className={`flex-1 h-2 rounded-full transition-all ${
                                                         attenuationLevel === level 
@@ -797,7 +787,7 @@ export const ReportResult: React.FC<ReportResultProps> = ({ report: initialRepor
 
                                     <div className="grid grid-cols-2 gap-3">
                                         <button 
-                                            onClick={() => fetchAlternatives("Redueix la intensitat positiva de la frase. Fes-la més neutra, subtil i equilibrada, evitant adjectius massa entusiastes o elogis excessius.")} 
+                                            onClick={() => fetchAlternatives("Redueix la intensitat positiva de la frase. Fes-la més neutra, subtil i equilibrada, evitant adjectius massa entusiastes o elogis excessius.", undefined, 'soften')}
                                             data-tooltip="Redueix la positivitat excessiva per fer la frase més neutra i equilibrada."
                                             className="p-4 bg-white border border-warm-200 rounded-2xl hover:border-blue-400 hover:bg-blue-50/10 transition-all flex flex-col items-center gap-2 shadow-sm text-center"
                                         >
@@ -806,7 +796,7 @@ export const ReportResult: React.FC<ReportResultProps> = ({ report: initialRepor
                                         </button>
 
                                     <button 
-                                        onClick={() => fetchAlternatives("Reformular la frase per fer-la més explícita, clara i directa.")} 
+                                        onClick={() => fetchAlternatives("Reformular la frase per fer-la més explícita, clara i directa.", undefined, 'direct')}
                                         data-tooltip="Fa la frase més clara, explícita i directa, destacant la realitat dels fets."
                                         className="p-4 bg-white border border-warm-200 rounded-2xl hover:border-amber-400 hover:bg-amber-50/10 transition-all flex flex-col items-center gap-2 shadow-sm text-center"
                                     >
@@ -844,6 +834,7 @@ export const ReportResult: React.FC<ReportResultProps> = ({ report: initialRepor
 
                                 {/* Resultats suggerits */}
                                 <div className="space-y-4 pt-4 border-t border-warm-200">
+                                    {alternativesError && <p role="status" className="text-xs text-amber-800">{alternativesError}</p>}
                                     {isRewriting ? (
                                         <div className="flex flex-col items-center justify-center py-12 gap-3">
                                             <Loader2 className="w-6 h-6 animate-spin text-primary-900" />
