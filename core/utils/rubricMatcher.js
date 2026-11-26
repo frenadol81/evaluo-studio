@@ -47,7 +47,7 @@ export const isOptionSelected = (tagList, optionText, studentName = '') => {
   // 2. Coincidència amb interpolació de nom
   if (studentName) {
     const cleanName = String(studentName).replace(/\s*[\(\[]?[1-6](?:º|t|rt|è|r|n)?\s*[A-Za-z]?[\)\]]?$/i, '').trim();
-    const firstName = cleanName.replace(/^(en|na|el|la|l'|l’)\s*/i, '').split(/\s+/)[0] || cleanName;
+    const firstName = cleanName.replace(/^(?:(?:en|na|el|la)\s+|l['’]\s*)/i, '').split(/\s+/)[0] || cleanName;
 
     const subFullName = optionText.replace(/\{nom\}/g, cleanName);
     if (tagList.includes(subFullName)) return true;
@@ -173,7 +173,8 @@ export const updateRowSelectionSafely = (currentTags = [], row, targetOptionText
  */
 export const healStudentTags = (tags = [], rubrics = [], studentName = '') => {
   if (!Array.isArray(tags) || tags.length === 0) return [];
-  const allRows = rubrics.flatMap(r => r.data || []);
+  const options = [...new Set(rubrics.flatMap(rubric => (rubric.data || []).flatMap(row => row.options || [])))];
+  const canonical = new Set(options);
   const healed = [];
 
   for (const tag of tags) {
@@ -183,28 +184,13 @@ export const healStudentTags = (tags = [], rubrics = [], studentName = '') => {
       continue;
     }
 
-    let matchedCanonical = null;
-
-    // Anteposa les coincidències literals a les aproximades, perquè dos nivells
-    // semblants d'una mateixa fila no quedin reduïts al primer.
-    const exact = allRows.some(row => row.options?.includes(tag));
-    for (const row of exact ? [] : allRows) {
-      if (!row.options) continue;
-      for (const opt of row.options) {
-        if (isOptionSelected([tag], opt, studentName)) {
-          matchedCanonical = opt;
-          break;
-        }
-      }
-      if (matchedCanonical) break;
-    }
-
-    if (matchedCanonical) {
-      healed.push(matchedCanonical);
-    } else {
-      // Tags lliures, personalitat o manuals es conserven
+    if (canonical.has(tag)) {
       healed.push(tag);
+      continue;
     }
+    const matches = options.filter(option => isOptionSelected([tag], option, studentName));
+    // Una etiqueta amb més d'una correspondència conserva el text original.
+    healed.push(matches.length === 1 ? matches[0] : tag);
   }
 
   return [...new Set(healed)];

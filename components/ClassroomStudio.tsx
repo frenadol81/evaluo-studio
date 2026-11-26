@@ -5,6 +5,7 @@ import { StudentPortrait } from './StudentPortrait';
 import { PEClothingRegister } from './PEClothingRegister';
 import { ClassroomEvidence } from './ClassroomEvidence';
 import { isPhotoImportFile, readDroppedPhotoFiles, readStudentPhotos } from '../infrastructure/services/studentPhotoImport';
+import { archiveSessionDocument } from '../infrastructure/storage/sessionBackup';
 import { studentMemberships } from '../infrastructure/services/studentMemberships';
 import { groupingHistory, groupingPairs, proposeGrouping, type SupportRole } from '../infrastructure/services/classroomGrouping';
 
@@ -63,6 +64,7 @@ export function ClassroomStudio({ students, groups, activeGroupId, trimester, pe
   const [newName, setNewName] = useState('');
   const [selectedPupil, setSelectedPupil] = useState('');
   const [draft, setDraft] = useState<PhotoCrop | null>(null);
+  const pendingCrop = useRef<PhotoCrop | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const drag = useRef<{ x: number; y: number; crop: PhotoCrop } | null>(null);
@@ -208,6 +210,7 @@ export function ClassroomStudio({ students, groups, activeGroupId, trimester, pe
     try {
       const saved = await onUpdatePhoto(String(target.id), change);
       if (!saved) throw new Error('Perfil no disponible.');
+      pendingCrop.current = null;
       setDraft(null);
       setMessage('Foto actualitzada.');
     } catch {
@@ -217,12 +220,25 @@ export function ClassroomStudio({ students, groups, activeGroupId, trimester, pe
     }
   }
 
+  const previewCrop = (next: PhotoCrop) => {
+    pendingCrop.current = next;
+    setDraft(next);
+  };
+
+  const savePendingCrop = () => {
+    const next = pendingCrop.current;
+    if (!next || !pupil) return;
+    pendingCrop.current = null;
+    void savePhoto({ photoCrop: next });
+  };
+
   async function replacePhoto(file?: File, target = pupil) {
     if (!file || !target || busy) return;
     if (target.info.photoUrl && !window.confirm(`Vols substituir la foto de ${target.info.name}?`)) return;
     setBusy(true);
     try {
       const [image] = await readStudentPhotos(file, []);
+      await archiveSessionDocument(file, 'foto-perfil');
       await savePhoto({ photoUrl: await image.read(), photoCrop: undefined }, target);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'No s’ha pogut llegir la imatge.');
@@ -304,6 +320,7 @@ export function ClassroomStudio({ students, groups, activeGroupId, trimester, pe
             setSelectedPupil('');
             setPickedPupil('');
             setEvidencePupilId('');
+            pendingCrop.current = null;
             setDraft(null);
             setMessage('');
           }} className="rounded-lg border border-warm-200 bg-white px-3 py-2">
@@ -405,7 +422,7 @@ export function ClassroomStudio({ students, groups, activeGroupId, trimester, pe
                 <li key={student.id} onDragOver={event => event.preventDefault()}
                   onDrop={event => dropIndividualPhoto(event, student)}>
                   <button type="button" disabled={busy} aria-pressed={selectedPupil === String(student.id)}
-                    onClick={() => { setSelectedPupil(String(student.id)); setDraft(null); setMessage(''); }}
+                    onClick={() => { pendingCrop.current = null; setSelectedPupil(String(student.id)); setDraft(null); setMessage(''); }}
                     className="flex w-full items-center gap-2 rounded-lg p-2 text-left text-sm hover:bg-warm-50 aria-pressed:bg-warm-100">
                     {portrait(student)} {student.info.name}
                   </button>
@@ -447,12 +464,12 @@ export function ClassroomStudio({ students, groups, activeGroupId, trimester, pe
                           const initial = drag.current;
                           const width = event.currentTarget.getBoundingClientRect().width;
                           const clamp = (value: number) => Math.min(100, Math.max(0, value));
-                          setDraft({ ...initial.crop,
+                          previewCrop({ ...initial.crop,
                             x: clamp(initial.crop.x - (event.clientX - initial.x) * 100 / width),
                             y: clamp(initial.crop.y - (event.clientY - initial.y) * 100 / width),
                           });
                         }}
-                        onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}>
+                        onPointerUp={() => { drag.current = null; savePendingCrop(); }} onPointerCancel={() => { drag.current = null; savePendingCrop(); }}>
                         <StudentPortrait src={pupil.info.photoUrl} name={pupil.info.name} crop={crop} size="h-32 w-32" thumbnail />
                       </div>
                       <div className="space-y-2">
@@ -470,13 +487,15 @@ export function ClassroomStudio({ students, groups, activeGroupId, trimester, pe
                     ] as const).map(([key, label, min, max, step]) => (
                       <label key={key} className="grid max-w-sm gap-1 text-sm">{label}
                         <input type="range" min={min} max={max} step={step} value={crop[key]} disabled={busy}
-                          onChange={event => setDraft({ ...crop, [key]: event.target.valueAsNumber })} />
+                          onChange={event => previewCrop({ ...crop, [key]: event.target.valueAsNumber })}
+                          onPointerUp={savePendingCrop} onPointerCancel={savePendingCrop}
+                          onKeyUp={savePendingCrop} onBlur={savePendingCrop} />
                       </label>
                     ))}
                     <div className="flex flex-wrap gap-3">
                       <button type="button" disabled={!draft || busy} onClick={() => void savePhoto({ photoCrop: crop })}
                         className="rounded-lg bg-primary-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">Desa l’enquadrament</button>
-                      <button type="button" disabled={busy} onClick={() => setDraft(defaultCrop)} className="text-sm font-semibold">Restableix</button>
+                      <button type="button" disabled={busy} onClick={() => void savePhoto({ photoCrop: defaultCrop })} className="text-sm font-semibold">Restableix</button>
                     </div>
                   </div>
                 )}

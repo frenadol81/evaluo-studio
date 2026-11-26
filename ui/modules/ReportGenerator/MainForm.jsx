@@ -230,8 +230,12 @@ export const MainForm = ({ student, onUpdateStudent, onBack, initialTab, onGener
   };
 
   const handleUpdateContent = (field, value) => {
-    onUpdateStudent({ content: { ...student.content, [field]: value } });
+    onUpdateStudent({ content: { [field]: value } });
   };
+
+  const handleRubricUpdate = (field, update) => onUpdateStudent(current => ({
+    [field]: update(current[field] || {}),
+  }));
 
   const handleTogglePI = () => {
     onUpdateStudent({ info: { ...student.info, isPI: !student.info.isPI } });
@@ -453,7 +457,7 @@ export const MainForm = ({ student, onUpdateStudent, onBack, initialTab, onGener
                                 <div className="w-8 h-8 bg-amber-50 rounded-xl flex items-center justify-center text-amber-500 border border-amber-100"><ScrollText className="w-4 h-4" /></div>
                                 <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Frase Pont / Inici d'Informe</h3>
                             </header>
-                            <RubricFactory density={density} section={rubrics.find(r => r.id === 'introduccio_informe')} studentData={student} onUpdate={(field, value) => onUpdateStudent({ [field]: value })} />
+                            <RubricFactory density={density} section={rubrics.find(r => r.id === 'introduccio_informe')} studentData={student} onUpdate={handleRubricUpdate} />
                         </div>
 
                         <div className="space-y-8 pt-12 border-t border-warm-100">
@@ -461,7 +465,7 @@ export const MainForm = ({ student, onUpdateStudent, onBack, initialTab, onGener
                                 <div className="w-8 h-8 bg-amber-50 rounded-xl flex items-center justify-center text-amber-500 border border-amber-100"><UserRoundSearch className="w-4 h-4" /></div>
                                 <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Personalitat i Caràcter</h3>
                             </header>
-                            <RubricFactory density={density} section={rubrics.find(r => r.id === 'personality_block')} studentData={student} onUpdate={(field, value) => onUpdateStudent({ [field]: value })} />
+                            <RubricFactory density={density} section={rubrics.find(r => r.id === 'personality_block')} studentData={student} onUpdate={handleRubricUpdate} />
                         </div>
                     </div>
                 )}
@@ -474,7 +478,7 @@ export const MainForm = ({ student, onUpdateStudent, onBack, initialTab, onGener
                                 {trimester === 3 ? 'Aspectes Personals' : 'Hàbits i Socialització'}
                             </h3>
                         </header>
-                        <RubricFactory density={density} section={rubrics.find(r => r.id === 'habits_treball')} studentData={student} onUpdate={(field, value) => onUpdateStudent({ [field]: value })} />
+                        <RubricFactory density={density} section={rubrics.find(r => r.id === 'habits_treball')} studentData={student} onUpdate={handleRubricUpdate} />
                     </div>
                 )}
 
@@ -484,7 +488,7 @@ export const MainForm = ({ student, onUpdateStudent, onBack, initialTab, onGener
                             <div className="w-8 h-8 bg-rose-50 rounded-xl flex items-center justify-center text-rose-500 border border-rose-100"><BookText className="w-4 h-4" /></div>
                             <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Àmbit Lingüístic</h3>
                         </header>
-                        <RubricFactory density={density} section={rubrics.find(r => r.id === 'ambit_linguistic')} studentData={student} onUpdate={(field, value) => onUpdateStudent({ [field]: value })} />
+                        <RubricFactory density={density} section={rubrics.find(r => r.id === 'ambit_linguistic')} studentData={student} onUpdate={handleRubricUpdate} />
                     </div>
                 )}
 
@@ -494,7 +498,7 @@ export const MainForm = ({ student, onUpdateStudent, onBack, initialTab, onGener
                             <div className="w-8 h-8 bg-blue-50 rounded-xl flex items-center justify-center text-blue-500 border border-blue-100"><Calculator className="w-4 h-4" /></div>
                             <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Àmbit Matemàtic</h3>
                         </header>
-                        <RubricFactory density={density} section={rubrics.find(r => r.id === 'ambit_matematic')} studentData={student} onUpdate={(field, value) => onUpdateStudent({ [field]: value })} />
+                        <RubricFactory density={density} section={rubrics.find(r => r.id === 'ambit_matematic')} studentData={student} onUpdate={handleRubricUpdate} />
                     </div>
                 )}
 
@@ -504,7 +508,7 @@ export const MainForm = ({ student, onUpdateStudent, onBack, initialTab, onGener
                             <div className="w-8 h-8 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600 border border-emerald-100"><Microscope className="w-4 h-4" /></div>
                             <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Àmbit de Medi</h3>
                         </header>
-                        <RubricFactory density={density} section={rubrics.find(r => r.id === 'ambit_medi')} studentData={student} onUpdate={(field, value) => onUpdateStudent({ [field]: value })} />
+                        <RubricFactory density={density} section={rubrics.find(r => r.id === 'ambit_medi')} studentData={student} onUpdate={handleRubricUpdate} />
                     </div>
                 )}
 
@@ -514,7 +518,7 @@ export const MainForm = ({ student, onUpdateStudent, onBack, initialTab, onGener
                             <div className="w-8 h-8 bg-orange-50 rounded-xl flex items-center justify-center text-orange-500 border border-orange-100"><Trophy className="w-4 h-4" /></div>
                             <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Educació Física</h3>
                         </header>
-                        <RubricFactory density={density} section={rubrics.find(r => r.id === 'ambit_fisica')} studentData={student} onUpdate={(field, value) => onUpdateStudent({ [field]: value })} />
+                        <RubricFactory density={density} section={rubrics.find(r => r.id === 'ambit_fisica')} studentData={student} onUpdate={handleRubricUpdate} />
                     </div>
                 )}
 
@@ -524,7 +528,7 @@ export const MainForm = ({ student, onUpdateStudent, onBack, initialTab, onGener
                             <div className="w-8 h-8 bg-sky-50 rounded-xl flex items-center justify-center text-sky-500 border border-sky-100"><Globe className="w-4 h-4" /></div>
                             <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Valors Cívics i Ètics</h3>
                         </header>
-                        <RubricFactory density={density} section={rubrics.find(r => r.id === 'ambit_valors')} studentData={student} onUpdate={(field, value) => onUpdateStudent({ [field]: value })} />
+                        <RubricFactory density={density} section={rubrics.find(r => r.id === 'ambit_valors')} studentData={student} onUpdate={handleRubricUpdate} />
                     </div>
                 )}
 
@@ -538,7 +542,7 @@ export const MainForm = ({ student, onUpdateStudent, onBack, initialTab, onGener
                             density={density} 
                             section={rubrics.find(r => r.id === 'ambit_maker')} 
                             studentData={student} 
-                            onUpdate={(field, value) => onUpdateStudent({ [field]: value })} 
+                            onUpdate={handleRubricUpdate}
                         />
                     </div>
                 )}
@@ -553,7 +557,7 @@ export const MainForm = ({ student, onUpdateStudent, onBack, initialTab, onGener
                             density={density} 
                             section={rubrics.find(r => r.id === 'ambit_planeta_blau')} 
                             studentData={student} 
-                            onUpdate={(field, value) => onUpdateStudent({ [field]: value })} 
+                            onUpdate={handleRubricUpdate}
                         />
                     </div>
                 )}

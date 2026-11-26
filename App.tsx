@@ -10,6 +10,7 @@ import { mergeClothingEvidence } from './infrastructure/services/peClothing';
 import { studentMemberships, withSharedStudentPhotos } from './infrastructure/services/studentMemberships';
 import { createStudent } from './core/domain/student.model.js';
 import { db, initDB } from './infrastructure/storage/db';
+import { archiveSessionDocument, exportSession, parseSessionExtras, restoreSession } from './infrastructure/storage/sessionBackup';
 import { executeGenerateReport } from './application/useCases/generateStudentReport.js';
 import { parseMathRegisterCSV } from './infrastructure/services/mathRegisterParser';
 import { parseEspaisRegister, type ParseEspaisResult } from './infrastructure/services/espaisRegisterParser';
@@ -126,6 +127,7 @@ const App: React.FC = () => {
     groups: any[];
     rawCount: number;
     classesCount: number;
+    extras?: ReturnType<typeof parseSessionExtras>;
   } | null>(null);
   const [importNotification, setImportNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -201,6 +203,7 @@ const App: React.FC = () => {
 
       for (const file of inputFiles) {
         try {
+          await archiveSessionDocument(file, 'fotos');
           const codes = photoGroupCodes(file.name.replace(/\.[^.]+$/, ''));
           const folders = (file as Partial<DrivePhotoFile>).photoFolders ||
             file.webkitRelativePath?.split('/').slice(0, -1) || [];
@@ -950,7 +953,7 @@ const App: React.FC = () => {
   // Cua per garantir que les escriptures consecutives a Dexie mantinguin l'ordre i no es perdin
   const updateQueueRef = useRef<Promise<any>>(Promise.resolve());
 
-  const handleUpdateStudentField = useCallback((id: string, updates: any): Promise<any> => {
+  const handleUpdateStudentField = useCallback((id: string, change: any): Promise<any> => {
     if (!id) return Promise.resolve();
 
     const task = updateQueueRef.current.then(async () => {
@@ -958,7 +961,8 @@ const App: React.FC = () => {
       const index = currentList.findIndex(s => String(s.id) === String(id));
       if (index === -1) return null;
 
-      const oldStudent = currentList[index];
+      const oldStudent = createStudent(currentList[index], selectedTrimester);
+      const updates = typeof change === 'function' ? change(oldStudent) : change;
       const mergedData = { 
         ...oldStudent, 
         ...updates,
@@ -1074,6 +1078,7 @@ const App: React.FC = () => {
 
   const handleImportJSON = async (jsonData: any) => {
     try {
+      const extras = parseSessionExtras(jsonData);
       let rawList: any[] = [];
       let groupsToImport: any[] = [];
       if (Array.isArray(jsonData)) {
@@ -1085,20 +1090,20 @@ const App: React.FC = () => {
         throw new Error("Format no reconegut. El fitxer ha de contenir una llista d'alumnes o un objecte amb 'students'.");
       }
 
-      if (rawList.length === 0) {
+      if (!extras && rawList.length === 0) {
         throw new Error("El fitxer no conté cap alumne per importar.");
       }
 
       // 1. Validem i preparem primer TOTS els alumnes en memòria abans de modificar la base de dades
       const validated = rawList.map((s, idx) => {
-        if (!s || typeof s !== 'object') {
+        if (!s || typeof s !== 'object' || (extras && (!s.id || !s.info?.name))) {
           throw new Error(`Alumne no vàlid a la posició ${idx + 1}.`);
         }
-        const created = createStudent({ ...s, info: { ...s.info, order: s.info?.order ?? idx } }, selectedTrimester);
+        const created = createStudent({ ...structuredClone(s), info: { ...s.info, order: s.info?.order ?? idx } }, selectedTrimester);
         if (!created.id || !created.info?.name) {
           throw new Error(`Dades incompletes o nom no vàlid a l'alumne de la posició ${idx + 1}.`);
         }
-        return JSON.parse(JSON.stringify(created));
+        return extras ? s : JSON.parse(JSON.stringify(created));
       });
 
       // 2. Curació de grups (Group healing): Si els alumnes referencien un groupId que no és a groups,
@@ -1118,7 +1123,8 @@ const App: React.FC = () => {
         students: validated,
         groups: healedGroups,
         rawCount: validated.length,
-        classesCount: healedGroups.length
+        classesCount: healedGroups.length,
+        extras,
       });
       setShowAddStudentModal(false);
     } catch (e: any) { 
@@ -1130,23 +1136,21 @@ const App: React.FC = () => {
   const commitTransactionalImport = async () => {
     if (!importPreviewData) return;
     try {
-      const { students: validated, groups: healedGroups } = importPreviewData;
-
-      // Transacció atòmica a Dexie: si falla qualsevol pas, es reverteix i no s'esborra res
-      await db.transaction('rw', db.students, async () => {
-        await db.students.clear();
-        for (const student of validated) {
-          await db.students.put(student);
-        }
-      });
-
-      const sortedStudents = [...validated].sort((a, b) => (a.info.order || 0) - (b.info.order || 0));
+      const { students: validated, groups: healedGroups, extras } = importPreviewData;
+      const restoredTrimester = Number(extras?.preferences.evaluo_trimester);
+      const trimester = [1, 2, 3].includes(restoredTrimester) ? restoredTrimester : selectedTrimester;
+      const sortedStudents = validated.map(student => createStudent(structuredClone(student), trimester))
+        .sort((a, b) => (a.info.order || 0) - (b.info.order || 0));
+      await updateQueueRef.current;
+      await restoreSession(validated, healedGroups, extras);
+      studentsRef.current = sortedStudents;
       setStudents(sortedStudents);
-      
-      if (healedGroups.length > 0) {
-        setGroups(healedGroups);
-        localStorage.setItem('evaluo_groups', JSON.stringify(healedGroups));
-      }
+      setGroups(healedGroups);
+      setSelectedTrimester(trimester);
+      setSelectedStudentId(null);
+      setActiveGroupId('ALL');
+      setViewMode('aula');
+      if (extras) setDriveFolderId(extras.preferences.evaluo_drive_folder_id || import.meta.env.VITE_DRIVE_PHOTO_FOLDER || '');
 
       setImportPreviewData(null);
       setImportNotification({ 
@@ -1165,19 +1169,26 @@ const App: React.FC = () => {
   };
 
   const handleExportSession = async () => {
-    const allStudents = await db.students.toArray();
-    const sessionData = {
-      exportDate: new Date().toISOString(),
-      students: allStudents.map(s => createStudent(s, selectedTrimester)).sort((a, b) => (a.info?.order || 0) - (b.info?.order || 0)),
-      groups: groups
-    };
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(sessionData, null, 2));
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", `evaluo_sessio_${new Date().toISOString().split('T')[0]}.json`);
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
+    try {
+      await updateQueueRef.current;
+      const sessionData = await exportSession(groups);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(sessionData)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `evaluo_sessio_${sessionData.exportDate.split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      if (sessionData.unavailablePhotos) {
+        setImportNotification({
+          type: 'error',
+          message: `Còpia descarregada. ${sessionData.unavailablePhotos} fotos temporals ja no són accessibles. Torna a carregar-les abans d’exportar si les vols recuperar en un altre navegador.`,
+        });
+      }
+    } catch (error) {
+      setImportNotification({ type: 'error', message: `No s’ha pogut crear la còpia: ${error instanceof Error ? error.message : String(error)}` });
+    }
   };
 
   const handleMoveStudent = async (id: string, direction: 'up' | 'down') => {
@@ -1210,10 +1221,11 @@ const App: React.FC = () => {
   const handleGenerateReport = async (studentId: string, customConfig?: any) => {
     const student = students.find(s => String(s.id) === String(studentId));
     if (!student) return;
-    await handleUpdateStudentField(studentId, { state: { ...student.state, status: 'generating' } });
+    const currentStudent = await handleUpdateStudentField(studentId, { state: { status: 'generating' } });
+    if (!currentStudent) return;
     try {
       const res = await executeGenerateReport(
-        student, 
+        currentStudent,
         { ...(customConfig || { styleLevel: 0.5, intensityLevel: 0 }), forceRegenerate: true }, 
         selectedTrimester
       );
@@ -1230,7 +1242,7 @@ const App: React.FC = () => {
       return reportText;
     } catch (err: any) { 
       console.error("Error al generar informe per a l'alumne:", err);
-      await handleUpdateStudentField(studentId, { state: { ...student.state, status: 'error' } }); 
+      await handleUpdateStudentField(studentId, { state: { status: 'error' } });
       setImportNotification({
         type: 'error',
         message: `Error en generar informe: ${err?.message || "Error desconegut"}`
@@ -1348,6 +1360,7 @@ const App: React.FC = () => {
                                 try { handleImportJSON(JSON.parse(ev.target?.result as string)); } catch(e) { alert("Format JSON invàlid."); }
                             };
                             reader.readAsText(file);
+                            e.currentTarget.value = '';
                         }
                     }} />
                     <input type="file" ref={fileInputExcelRef} className="hidden" accept=".xlsx,.xls,.csv,.txt" onChange={async (e) => {
@@ -1355,6 +1368,7 @@ const App: React.FC = () => {
                         e.currentTarget.value = '';
                         if (!file) return;
                         try {
+                            await archiveSessionDocument(file, 'matematiques');
                             let csv: string;
                             if (/\.(xlsx|xls)$/i.test(file.name)) {
                                 const XLSX = await import('xlsx');
@@ -1377,7 +1391,8 @@ const App: React.FC = () => {
                             const reader = new FileReader();
                             reader.onload = (ev) => {
                                 const buffer = ev.target?.result as ArrayBuffer;
-                                if (buffer) handleImportEspaisFile(buffer);
+                                if (buffer) void archiveSessionDocument(file, 'espais').then(() => handleImportEspaisFile(buffer))
+                                    .catch(() => setImportNotification({ type: 'error', message: 'No s’ha pogut arxivar el registre d’espais.' }));
                             };
                             reader.readAsArrayBuffer(file);
                             e.target.value = '';
@@ -1389,7 +1404,8 @@ const App: React.FC = () => {
                             const reader = new FileReader();
                             reader.onload = (ev) => {
                                 const buffer = ev.target?.result as ArrayBuffer;
-                                if (buffer) handleImportConferenceFile(buffer);
+                                if (buffer) void archiveSessionDocument(file, 'conferencies').then(() => handleImportConferenceFile(buffer))
+                                    .catch(() => setImportNotification({ type: 'error', message: 'No s’ha pogut arxivar el registre de conferències.' }));
                             };
                             reader.readAsArrayBuffer(file);
                             e.target.value = '';
@@ -1398,7 +1414,8 @@ const App: React.FC = () => {
                     <input type="file" ref={fileInputReadingRef} className="hidden" accept=".docx,.pdf,.xlsx,.xls,.csv,.tsv,.txt" onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (file) {
-                            handleImportReadingFile(file);
+                            void archiveSessionDocument(file, 'lectura').then(() => handleImportReadingFile(file))
+                                .catch(() => setImportNotification({ type: 'error', message: 'No s’ha pogut arxivar el registre de lectura.' }));
                             e.target.value = '';
                         }
                     }} />
@@ -1989,7 +2006,9 @@ const App: React.FC = () => {
                 <span className="font-black text-slate-900 px-3 py-1 bg-white rounded-xl border border-warm-200">{importPreviewData.classesCount}</span>
               </div>
               <div className="pt-2 border-t border-warm-200 text-[11px] text-amber-800 font-medium">
-                ⚠️ Aquesta acció substituirà la llista actual ({students.length} alumnes existents) per les noves dades validades mitjançant una transacció segura.
+                {importPreviewData.extras
+                  ? `Aquesta còpia substituirà la sessió actual, inclosos els registres, les agrupacions i els fitxers desats. Fitxers a restaurar: ${importPreviewData.extras.tables.sessionDocuments.length}.`
+                  : `Aquesta còpia antiga substituirà els ${students.length} alumnes i els grups. Els altres registres locals es conservaran.`}
               </div>
             </div>
 

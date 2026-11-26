@@ -3,7 +3,6 @@ import { reportFingerprint } from './reportFingerprint.js';
 import { calculatePromptConfig } from '../../core/logic/toneMatrix.js';
 import { buildReportPrompt } from '../../infrastructure/api/promptBuilder.js';
 import { callGeminiAPI } from '../../infrastructure/api/geminiClient.js';
-import { db } from '../../infrastructure/storage/db';
 import { MAKER_SYSTEM_INSTRUCTION, SYSTEM_INSTRUCTION, PLANETA_BLAU_SYSTEM_INSTRUCTION } from '../../constants';
 import { getRubricsForTrimester } from '../../core/config/rubrics/index.js';
 import { buildPlanetaBlauReport } from './buildPlanetaBlauReport.js';
@@ -62,30 +61,6 @@ export const executeGenerateReport = async (student, configUI, trimester = 2) =>
     const piClause = "Aquesta avaluació s'ha realitzat d'acord amb els criteris i les adaptacions recollides al seu Pla Individual (PI).";
     if (student.info?.isPI && !generatedText.includes(piClause)) {
       generatedText = `${generatedText.trim()}\n\n${piClause}`;
-    }
-
-    // 5. Persistir el resultat a la base de dades local
-    if (student.id) {
-      try {
-        // Obtenim objecte complet per mantenir la integritat del mapa de trimestres si cal
-        const s = await db.students.get(student.id);
-        if (s) {
-            const trimesters = s.trimesters || {};
-            if (!trimesters[trimester]) trimesters[trimester] = { content: {}, state: {} };
-            
-            trimesters[trimester].state = {
-                ...trimesters[trimester].state,
-                status: 'completed',
-                generatedReport: generatedText,
-                reportFingerprint: currentFingerprint,
-                lastModified: new Date().toISOString()
-            };
-
-            await db.students.put({ ...s, trimesters });
-        }
-      } catch (dbErr) {
-        console.warn("No s'ha pogut guardar a la DB, però l'informe s'ha generat:", dbErr);
-      }
     }
 
     return { text: generatedText, fingerprint: currentFingerprint, reused: false };

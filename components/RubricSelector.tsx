@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
+import { archiveSessionDocument } from '../infrastructure/storage/sessionBackup';
 import { List, Plus, ChevronDown, ChevronUp, BookOpenCheck, Sigma, Globe, BrainCircuit, Cpu, Download, Upload, RotateCcw, Zap, Check, Sprout, Fingerprint } from 'lucide-react';
 import { Rubric, RubricItem } from '../types';
 import { DEFAULT_RUBRICS } from '../constants';
@@ -136,10 +137,11 @@ export const RubricSelector: React.FC<RubricSelectorProps> = ({
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const json = JSON.parse(event.target?.result as string);
         if (Array.isArray(json) && json.length > 0 && json[0].name && json[0].categories) {
+           await archiveSessionDocument(file, 'rubriques');
            saveRubricsToStorage(json);
            alert("Rúbriques importades correctament!");
         } else {

@@ -71,11 +71,21 @@ export interface ClassroomEvidence {
   points?: number;
 }
 
+export interface SessionDocument {
+  id: string;
+  name: string;
+  type: string;
+  source: string;
+  importedAt: string;
+  base64: string;
+}
+
 export class EvaluoDB extends Dexie {
   students!: Table<Student, string | number>;
   classes!: Table<Class>;
   classroomEvidence!: Table<ClassroomEvidence, string>;
   dojoSummaries!: Table<DojoSummary, string>;
+  sessionDocuments!: Table<SessionDocument, string>;
 
   constructor() {
     super('EvaluoDB');
@@ -85,6 +95,7 @@ export class EvaluoDB extends Dexie {
     });
     this.version(2).stores({ classroomEvidence: 'id, pupilId, groupId' });
     this.version(3).stores({ dojoSummaries: 'id, pupilId, groupId' });
+    this.version(4).stores({ sessionDocuments: 'id' });
   }
 }
 

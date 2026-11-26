@@ -5,6 +5,7 @@ import type { PhotoCrop } from '../types';
 import { db, type ClassroomEvidence as Evidence } from '../infrastructure/storage/db';
 import { dojoFields, guessDojoColumns, reviewDojoRows, type DojoColumns, type DojoPupil } from '../infrastructure/services/classDojoImport';
 import { dojoPeriod, matchDojoSummary, parseDojoSummary, type DojoSummary, type DojoSummaryRow } from '../infrastructure/services/classDojoSummary';
+import { archiveSessionDocument } from '../infrastructure/storage/sessionBackup';
 import { StudentPortrait } from './StudentPortrait';
 
 type Pupil = DojoPupil & { photoUrl?: string; photoCrop?: PhotoCrop };
@@ -162,6 +163,7 @@ function DojoPreview({ groupId, groupName, pupils, records, busy, status, onClos
       const rows = xlsx.utils.sheet_to_json<string[]>(workbook.Sheets[workbook.SheetNames[0]],
         { header: 1, defval: '', raw: false, blankrows: false });
       if (rows.length < 2) throw new Error();
+      await archiveSessionDocument(file, 'classdojo');
       const aggregate = parseDojoSummary(rows);
       if (aggregate) {
         setSummary(aggregate);

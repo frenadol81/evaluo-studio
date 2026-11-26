@@ -20,61 +20,45 @@ export const RubricFactory = ({ section, studentData, onUpdate, density = 'balan
   const displayName = studentData.info?.name || "l'alumne/a";
 
   const handleToggleObservation = (text, categoryId) => {
-    const currentTags = Array.isArray(studentData.content?.tags) ? [...studentData.content.tags] : [];
-
     if (section.inputType === 'TAG_CLOUD') {
-      const isAlreadySelected = currentTags.includes(text);
-      let nextTags;
-      if (isAlreadySelected) nextTags = currentTags.filter(t => t !== text);
-      else {
-        nextTags = [...currentTags, text];
-      }
-      onUpdate('content', { tags: nextTags });
+      onUpdate('content', content => {
+        const tags = content.tags || [];
+        return { tags: tags.includes(text) ? tags.filter(tag => tag !== text) : [...tags, text] };
+      });
       return;
     }
 
     const activeRow = section.data?.find(d => d.id === categoryId);
     if (!activeRow || !activeRow.options) return;
 
-    // BLINDATGE ANTI-BUIDAT:
-    // Un cop emplenada una fila de rúbrica, mai es torna a buidar per un clic accidental!
-    // Si es fa clic sobre l'opció ja activa, es manté seleccionada.
-    // Si es fa clic sobre un altre nivell, canvia al nou nivell de manera neta.
-    const nextTags = updateRowSelectionSafely(currentTags, activeRow, text, displayName, false);
-    onUpdate('content', { tags: nextTags });
+    onUpdate('content', content => ({
+      tags: updateRowSelectionSafely(content.tags, activeRow, text, displayName),
+    }));
   };
 
   const handleToggleSenseEvidencies = (categoryId) => {
-    const currentTags = Array.isArray(studentData.content?.tags) ? [...studentData.content.tags] : [];
     const activeRow = section.data?.find(d => d.id === categoryId);
     if (!activeRow) return;
 
     // Protecció anti-buidat per a 'Sense evidències'
-    const nextTags = updateRowSelectionSafely(currentTags, activeRow, '', displayName, true);
-    onUpdate('content', { tags: nextTags });
+    onUpdate('content', content => ({
+      tags: updateRowSelectionSafely(content.tags, activeRow, '', displayName, true),
+    }));
   };
   
   const handleUpdateNuance = (rowId, value) => {
-    const currentNuances = studentData.content?.nuances || {};
-    onUpdate('content', { 
-      ...studentData.content, 
-      nuances: { ...currentNuances, [rowId]: value } 
-    });
+    onUpdate('content', content => ({ nuances: { ...content.nuances, [rowId]: value } }));
   };
 
   const handleBulkAssign = (levelIndex) => {
     if (!section.data) return;
-    const currentTags = Array.isArray(studentData.content?.tags) ? [...studentData.content.tags] : [];
-    let updatedTags = [...currentTags];
-
-    section.data.forEach(row => {
-      const optionText = row.options ? row.options[levelIndex] : null;
-      if (optionText) {
-        updatedTags = updateRowSelectionSafely(updatedTags, row, optionText, displayName, false);
-      }
-    });
-
-    onUpdate('content', { tags: updatedTags });
+    onUpdate('content', content => ({
+      tags: section.data.reduce((tags, row) => {
+        const option = row.options?.[levelIndex];
+        return option && !isOptionSelected(tags, option, displayName)
+          ? updateRowSelectionSafely(tags, row, option, displayName) : tags;
+      }, content.tags || []),
+    }));
   };
 
   const getDensityClasses = () => {

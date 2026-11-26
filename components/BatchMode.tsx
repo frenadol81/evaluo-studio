@@ -430,9 +430,11 @@ export const BatchMode = ({
     if (!optionText) return;
 
     filteredStudents.forEach(s => {
-      const currentTags = s.content?.tags || [];
-      const nextTags = updateRowSelectionSafely(currentTags, row, optionText, s.info?.name, false);
-      onUpdateStudentField(s.id, { content: { ...s.content, tags: nextTags } });
+      onUpdateStudentField(s.id, (current: any) => {
+        const tags = current.content?.tags || [];
+        return { content: { tags: isOptionSelected(tags, optionText, current.info?.name)
+          ? tags : updateRowSelectionSafely(tags, row, optionText, current.info?.name) } };
+      });
     });
   };
 
@@ -834,12 +836,9 @@ export const BatchMode = ({
                                                 </div>
                                                 <button 
                                                     onClick={() => {
-                                                        const currentTags = s.content?.tags || [];
-                                                        // BLINDATGE ANTI-BUIDAT:
-                                                        // Un cop assignat un nivell a la fila, mai es buida per un clic accidental!
-                                                        // Si es clica un altre nivell, es canvia de forma neta.
-                                                        const nextTags = updateRowSelectionSafely(currentTags, row, opt, s.info?.name, false);
-                                                        onUpdateStudentField(s.id, { content: { ...s.content, tags: nextTags } });
+                                                        onUpdateStudentField(s.id, (current: any) => ({
+                                                          content: { tags: updateRowSelectionSafely(current.content?.tags, row, opt, current.info?.name) },
+                                                        }));
                                                     }}
                                                     title={`${lvlObj.label} - ${lvlObj.full}`}
                                                     className={`border transition-all active:scale-90 shadow-sm ${dc.btn} ${active ? `${lvlObj.color} border-black/10 scale-125 shadow-md` : 'bg-warm-100/60 border-warm-200 hover:border-warm-300 hover:bg-white'}`} 
@@ -1075,7 +1074,7 @@ export const BatchMode = ({
             student={selectedStudent}
             onGenerate={() => onGenerateReport(selectedStudent.id)}
             isGenerating={selectedStudent.state?.status === 'generating'}
-            onUpdateContent={(field, value) => onUpdateStudentField(selectedStudent.id, { content: { ...selectedStudent.content, [field]: value } })}
+            onUpdateContent={(field, value) => onUpdateStudentField(selectedStudent.id, { content: { [field]: value } })}
             onUpdateStudent={(updates) => onUpdateStudentField(selectedStudent.id, updates)}
             onClose={() => setSelectedStudentId(null)}
             trimester={trimester}
@@ -1095,7 +1094,7 @@ export const BatchMode = ({
                   student={s}
                   trimester={trimester}
                   studentName={s?.info?.name}
-                  onUpdateContent={(field, value) => onUpdateStudentField(s.id, { content: { ...s.content, [field]: value } })}
+                  onUpdateContent={(field, value) => onUpdateStudentField(s.id, { content: { [field]: value } })}
                   onReset={() => { setReportInLabOpen(false); setActiveStudentIdInLab(null); }} 
                   onReportChange={(newReport) => onUpdateStudentField(s.id, { state: { ...s.state, generatedReport: newReport } })} 
                 />
@@ -1114,14 +1113,12 @@ export const BatchMode = ({
           onSave={(nuances) => {
             const student = students.find(s => String(s.id) === String(activeNuance.studentId));
             if (student) {
-              const currentNuances = student.content.nuances || {};
-              const nextNuances = { ...currentNuances };
-              if (nuances.length > 0) {
-                nextNuances[activeNuance.rubricId] = nuances;
-              } else {
-                delete nextNuances[activeNuance.rubricId];
-              }
-              onUpdateStudentField(student.id, { content: { ...student.content, nuances: nextNuances } });
+              onUpdateStudentField(student.id, (current: any) => {
+                const nextNuances = { ...current.content.nuances };
+                if (nuances.length > 0) nextNuances[activeNuance.rubricId] = nuances;
+                else delete nextNuances[activeNuance.rubricId];
+                return { content: { nuances: nextNuances } };
+              });
             }
             setActiveNuance(null);
           }}

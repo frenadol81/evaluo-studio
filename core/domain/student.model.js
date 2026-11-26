@@ -40,7 +40,7 @@ export const createStudent = (raw = {}, trimesterId = 2) => {
   };
 
   // El sistema agora gestiona un mapa de trimesters: { 1: {content, state}, 2: ... }
-  const trimesters = raw.trimesters || {};
+  const trimesters = { ...raw.trimesters };
 
   // MIGRACIÓ DE DADES LLEGACY
   // Si no hi ha mapa de trimesters però si dades a l'arrel, les preservem al trimestre actual i al T2
@@ -54,6 +54,7 @@ export const createStudent = (raw = {}, trimesterId = 2) => {
     
     const legacyPayload = {
       content: {
+        ...raw.content,
         manualObservations: Array.isArray(raw.content?.manualObservations) 
           ? [...raw.content.manualObservations] 
           : (Array.isArray(raw.observations) ? [...raw.observations] : (typeof raw.observations === 'string' ? [raw.observations] : [])),
@@ -90,7 +91,12 @@ export const createStudent = (raw = {}, trimesterId = 2) => {
   }
 
   // Dades per al trimestre seleccionat
-  const trimesterData = trimesters[trimesterId] || {
+  const savedTrimester = trimesters[trimesterId];
+  const trimesterData = savedTrimester ? {
+    ...savedTrimester,
+    content: { ...savedTrimester.content },
+    state: { ...savedTrimester.state },
+  } : {
     content: {
       manualObservations: [],
       tags: [],
@@ -117,7 +123,7 @@ export const createStudent = (raw = {}, trimesterId = 2) => {
 
   // BLINDATGE ANTI-BUIDAT: Si aquest trimestre no té tags però l'alumne ja en tenia a l'arrel
   // o en un altre trimestre de referència, mai buidem les rúbriques a zero!
-  if (!trimesterData.content.tags || trimesterData.content.tags.length === 0) {
+  if (!savedTrimester) {
     if (Array.isArray(raw.content?.tags) && raw.content.tags.length > 0) {
       trimesterData.content.tags = [...raw.content.tags];
     } else {
@@ -131,10 +137,6 @@ export const createStudent = (raw = {}, trimesterId = 2) => {
         }
       }
     }
-  }
-
-  if ((!trimesterData.content.nuances || Object.keys(trimesterData.content.nuances).length === 0) && raw.content?.nuances && Object.keys(raw.content.nuances).length > 0) {
-    trimesterData.content.nuances = { ...raw.content.nuances };
   }
 
   // VITAL: Només apliquem el contingut d'arrel si ve d'una actualització UI (raw._isUpdate === true)
