@@ -4,6 +4,7 @@ import * as xlsx from 'xlsx';
 import type { PhotoCrop } from '../types';
 import { db, type ClassroomEvidence as Evidence } from '../infrastructure/storage/db';
 import { dojoFields, guessDojoColumns, reviewDojoRows, type DojoColumns, type DojoPupil } from '../infrastructure/services/classDojoImport';
+import { dojoPeriod, matchDojoSummary, parseDojoSummary, type DojoSummary, type DojoSummaryRow } from '../infrastructure/services/classDojoSummary';
 import { StudentPortrait } from './StudentPortrait';
 
 type Pupil = DojoPupil & { photoUrl?: string; photoCrop?: PhotoCrop };
@@ -11,14 +12,15 @@ const button = 'min-h-10 rounded-lg border border-warm-200 bg-white px-3 py-2 te
 const primary = 'min-h-10 rounded-lg bg-primary-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50';
 const marks = ['Ajuda un company', 'Col·labora', 'Completa la tasca', 'Tasca pendent', 'Cal recordar el material'];
 
-export function ClassroomEvidence({ groupId, pupils, pupil, onClose }: {
-  groupId: string; pupils: Pupil[]; pupil?: Pupil; onClose: () => void;
+export function ClassroomEvidence({ groupId, groupName, pupils, pupil, onClose }: {
+  groupId: string; groupName: string; pupils: Pupil[]; pupil?: Pupil; onClose: () => void;
 }) {
   const [records, setRecords] = useState<Evidence[] | null>(null);
   const [lastId, setLastId] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [summaries, setSummaries] = useState<DojoSummary[]>([]);
   const busyRef = useRef(false);
   useEffect(() => {
     const subscription = liveQuery(() => db.classroomEvidence.toArray()).subscribe({
@@ -27,6 +29,15 @@ export function ClassroomEvidence({ groupId, pupils, pupil, onClose }: {
     });
     return () => subscription.unsubscribe();
   }, []);
+  useEffect(() => {
+    setSummaries([]);
+    if (!pupil) return;
+    const subscription = liveQuery(() => db.dojoSummaries.where('pupilId').equals(pupil.id).toArray()).subscribe({
+      next: setSummaries,
+      error: () => setStatus('No s’han pogut obrir els resums de ClassDojo.'),
+    });
+    return () => subscription.unsubscribe();
+  }, [pupil?.id]);
 
   async function save(action: () => Promise<string>) {
     if (busyRef.current) return;
@@ -46,7 +57,17 @@ export function ClassroomEvidence({ groupId, pupils, pupil, onClose }: {
         Importar ClassDojo
       </button>
       <span role="status" className="text-sm text-slate-700">{status}</span>
-      {importOpen && <DojoPreview groupId={groupId} pupils={pupils} records={records} busy={busy} status={status}
+      {importOpen && <DojoPreview groupId={groupId} groupName={groupName} pupils={pupils} records={records} busy={busy} status={status}
+        onImportSummary={entries => save(async () => {
+          const count = await db.transaction('rw', db.dojoSummaries, async () => {
+            const existing = await db.dojoSummaries.bulkGet(entries.map(entry => entry.id));
+            const current = entries.filter((entry, index) => !existing[index] || existing[index]!.end <= entry.end);
+            if (current.length) await db.dojoSummaries.bulkPut(current);
+            return current.length;
+          });
+          setImportOpen(false);
+          return `${count} resums desats · ${entries.length - count} tenien un resum més recent.`;
+        })}
         onClose={() => setImportOpen(false)} onImport={entries => save(async () => {
           const count = await db.transaction('rw', db.classroomEvidence, async () => {
             const existing = await db.classroomEvidence.bulkGet(entries.map(entry => entry.id));
@@ -72,6 +93,25 @@ export function ClassroomEvidence({ groupId, pupils, pupil, onClose }: {
               return `Evidència desada per a ${pupil.name}.`;
             })}>{label}</button>)}
         </div>
+        {summaries.length > 0 && <section className="mb-4 border-y border-warm-200 py-2">
+          <h4 className="font-semibold">Resums de ClassDojo</h4>
+          {[...summaries].sort((a, b) => b.end.localeCompare(a.end)).map(summary =>
+            <details key={summary.id} className="py-1 text-sm">
+              <summary className="cursor-pointer font-medium">
+                {summary.start} — {summary.end}{summary.groupId === groupId ? '' : ` · ${summary.groupId}`}
+              </summary>
+              <ul className="divide-y divide-warm-200">
+                {summary.categories.map(({ label, weight, count }, index) =>
+                  <li key={index} className="flex justify-between gap-2 py-1">
+                    <span>{label} ({weight > 0 ? '+' : ''}{weight})</span><strong>{count}</strong>
+                  </li>)}
+              </ul>
+              {!!summary.metrics.length && <dl className="mt-2 border-t border-warm-200 pt-1 text-slate-600">
+                {summary.metrics.map(({ label, value }, index) =>
+                  <div key={index} className="flex justify-between gap-2"><dt>{label}</dt><dd>{value}</dd></div>)}
+              </dl>}
+            </details>)}
+        </section>}
         <h4 className="font-semibold">Evidències recents</h4>
         {!history.length && <p className="text-sm text-slate-600">{records ? 'Encara no hi ha evidències.' : 'Registre no disponible.'}</p>}
         <ul className="divide-y divide-warm-200 text-sm">
@@ -93,14 +133,17 @@ export function ClassroomEvidence({ groupId, pupils, pupil, onClose }: {
   );
 }
 
-function DojoPreview({ groupId, pupils, records, busy, status, onClose, onImport }: {
-  groupId: string; pupils: Pupil[]; records: Evidence[] | null; busy: boolean;
+function DojoPreview({ groupId, groupName, pupils, records, busy, status, onClose, onImport, onImportSummary }: {
+  groupId: string; groupName: string; pupils: Pupil[]; records: Evidence[] | null; busy: boolean;
   status: string;
   onClose: () => void; onImport: (entries: Evidence[]) => void;
+  onImportSummary: (entries: DojoSummary[]) => void;
 }) {
   const [data, setData] = useState<string[][]>([]);
   const [columns, setColumns] = useState<DojoColumns | null>(null);
   const [choices, setChoices] = useState<Record<number, string>>({});
+  const [summary, setSummary] = useState<DojoSummaryRow[] | null>(null);
+  const [period, setPeriod] = useState({ start: '', end: '' });
   const [error, setError] = useState('');
   const [reading, setReading] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -111,6 +154,7 @@ function DojoPreview({ groupId, pupils, records, busy, status, onClose, onImport
     setData([]);
     setChoices({});
     setColumns(null);
+    setSummary(null);
     setError('');
     try {
       if (file.size > 10_000_000) throw new Error();
@@ -118,8 +162,14 @@ function DojoPreview({ groupId, pupils, records, busy, status, onClose, onImport
       const rows = xlsx.utils.sheet_to_json<string[]>(workbook.Sheets[workbook.SheetNames[0]],
         { header: 1, defval: '', raw: false, blankrows: false });
       if (rows.length < 2) throw new Error();
-      setData(rows);
-      setColumns(guessDojoColumns(rows[0]));
+      const aggregate = parseDojoSummary(rows);
+      if (aggregate) {
+        setSummary(aggregate);
+        setPeriod(dojoPeriod(file.name));
+      } else {
+        setData(rows);
+        setColumns(guessDojoColumns(rows[0]));
+      }
     } catch {
       setError('No s’ha pogut llegir el fitxer. Tria un CSV o Excel amb una capçalera i almenys una fila.');
     } finally { setReading(false); }
@@ -130,12 +180,22 @@ function DojoPreview({ groupId, pupils, records, busy, status, onClose, onImport
     new Set((records || []).map(entry => entry.id))) : [];
   const ready = rows.flatMap(row => row.record && !row.duplicate ? [row.record] : []);
   const duplicate = rows.filter(row => row.duplicate).length;
+  const reviewed = summary ? matchDojoSummary(summary, pupils, choices) : [];
+  const readySummaries = reviewed.filter(row => row.valid && row.pupilId && !row.repeated);
+  const validPeriod = Boolean(period.start && period.end && period.start <= period.end);
+
+  function importSummaries() {
+    if (!validPeriod) return;
+    onImportSummary(readySummaries.map(({ pupilId, categories, metrics }) => ({
+      id: JSON.stringify([groupId, pupilId, period.start]), groupId, pupilId, ...period, categories, metrics,
+    })));
+  }
 
   return (
     <dialog ref={dialog} aria-labelledby="dojo-title" onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}
       className="m-auto max-h-[90vh] w-[min(46rem,calc(100vw-2rem))] overflow-auto rounded-2xl border border-warm-200 bg-white p-4 text-slate-900 backdrop:bg-slate-900/40">
       <h3 id="dojo-title" className="text-lg font-bold">Importar punts de ClassDojo</h3>
-      <p className="mb-3 text-sm">Tria el fitxer del grup actual. Cada fila ha de tenir alumne, data, motiu i punts.</p>
+      <p className="mb-3 text-sm">Grup de destinació · <strong>{groupName}</strong></p>
       <label className="grid gap-1 text-sm font-semibold">Fitxer de punts
         <input type="file" accept=".csv,.xlsx,.xls" disabled={busy || reading} className="max-w-full text-sm"
           onChange={event => { const file = event.target.files?.[0]; if (file) void read(file); }} />
@@ -143,6 +203,34 @@ function DojoPreview({ groupId, pupils, records, busy, status, onClose, onImport
       {error && <p role="alert" className="mt-2 text-sm text-rose-700">{error}</p>}
       {status && <p role="status" className="mt-2 text-sm">{status}</p>}
       {reading && <p role="status" className="mt-2 text-sm">Llegint el fitxer…</p>}
+      {summary && <>
+        <div className="my-3 flex flex-wrap gap-3 text-sm">
+          <label className="grid gap-1">Inici del període
+            <input type="date" value={period.start} disabled={busy} className="rounded border border-warm-200 p-2"
+              onChange={event => setPeriod({ ...period, start: event.target.value })} />
+          </label>
+          <label className="grid gap-1">Final del període
+            <input type="date" value={period.end} min={period.start} disabled={busy} className="rounded border border-warm-200 p-2"
+              onChange={event => setPeriod({ ...period, end: event.target.value })} />
+          </label>
+        </div>
+        <p className="my-2 text-sm font-semibold">{readySummaries.length} alumnes preparats · {reviewed.length - readySummaries.length} pendents · {summary[0]?.categories.length || 0} categories detectades</p>
+        <ul className="max-h-64 divide-y divide-warm-200 overflow-auto border-y border-warm-200 text-sm">
+          {reviewed.map(row => <li key={row.index} className="flex flex-wrap items-center justify-between gap-2 py-2">
+            <span>{row.name}</span>
+            {!row.valid ? <span>Recompte no vàlid</span> : row.pupilId && !row.repeated && choices[row.index] === undefined
+              ? <span>Coincidència trobada</span>
+              : <label className="flex flex-wrap items-center gap-2">{row.repeated ? 'Alumne repetit' : 'Assignació'}
+                <select aria-label={`Assignació de ${row.name}`} className="max-w-full rounded border border-warm-200 p-1"
+                  disabled={busy} value={row.pupilId} onChange={event => setChoices({ ...choices, [row.index]: event.target.value })}>
+                  <option value="">Omet aquesta fila</option>
+                  {(row.candidates.length > 1 ? row.candidates : pupils).map(person =>
+                    <option key={person.id} value={person.id}>{person.name}</option>)}
+                </select>
+              </label>}
+          </li>)}
+        </ul>
+      </>}
       {columns && <div className="my-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
         {dojoFields.map(field => <label key={field.key} className="grid gap-1 text-sm font-semibold">{field.label}
           <select value={columns[field.key]} disabled={busy} className="w-full rounded border border-warm-200 p-2"
@@ -172,8 +260,11 @@ function DojoPreview({ groupId, pupils, records, busy, status, onClose, onImport
         </ul>
       </>}
       <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" className={primary} disabled={busy || reading || !records || !ready.length}
-          onClick={() => onImport(ready)}>Importar ({ready.length})</button>
+        {summary
+          ? <button type="button" className={primary} disabled={busy || reading || !validPeriod || !readySummaries.length}
+              onClick={importSummaries}>Importar resums ({readySummaries.length})</button>
+          : <button type="button" className={primary} disabled={busy || reading || !records || !ready.length}
+              onClick={() => onImport(ready)}>Importar ({ready.length})</button>}
         <button type="button" className={button} disabled={busy} onClick={onClose}>Cancel·lar</button>
       </div>
     </dialog>

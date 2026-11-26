@@ -882,9 +882,12 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
+    let cancelled = false;
     const loadData = async () => {
+      await updateQueueRef.current;
       await initDB();
       const allStudents = await db.students.toArray();
+      if (cancelled) return;
       const activeRubrics = getRubricsForTrimester(selectedTrimester);
       
       const oldText = "S'ha detectat una certa fluctuació en els resultats de les activitats de comprensió lectora; tot i que demostra capacitats per a una bona interpretació, encara li manca estabilitat per mantenir un nivell d'èxit constant en diferents contextos lectors.";
@@ -892,11 +895,9 @@ const App: React.FC = () => {
       
       const loaded = allStudents.map(s => {
         let student = createStudent(s, selectedTrimester);
-        let hasChanges = false;
 
         if (student.content?.nuances?.['l_comp_lect'] === oldText) {
           student.content.nuances['l_comp_lect'] = newText;
-          hasChanges = true;
         }
 
         // Auto-curació de tags per garantir que cap rúbrica es buidi per canvis de redacció
@@ -921,11 +922,6 @@ const App: React.FC = () => {
               }
             }
           };
-          hasChanges = true;
-        }
-
-        if (hasChanges) {
-          db.students.put(JSON.parse(JSON.stringify(student)));
         }
 
         return student;
@@ -943,6 +939,7 @@ const App: React.FC = () => {
       setGroups(currentGroups);
     };
     loadData();
+    return () => { cancelled = true; };
   }, [selectedTrimester]);
 
   const studentsRef = useRef<any[]>(students);
@@ -1007,6 +1004,10 @@ const App: React.FC = () => {
     // Encadenem el manejador d'error per no bloquejar la cua en fallades futures
     updateQueueRef.current = task.catch((err) => {
       console.error("Error en persistència de l'alumne:", err);
+      setImportNotification({
+        type: 'error',
+        message: "No s'ha pogut desar el canvi de l'alumne. Torna-ho a provar abans de tancar l'aplicació.",
+      });
       // Retornem null per mantenir la cua activa
       return null;
     });

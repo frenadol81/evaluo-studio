@@ -1,5 +1,5 @@
 import { RUBRIC_PLANETA_BLAU } from '../../core/config/rubrics/08_planeta_blau.js';
-import { PLANETA_BLAU_INITIAL_PHRASE, PLANETA_BLAU_FINAL_PHRASE } from '../../constants';
+import { PLANETA_BLAU_FAMILY_PHRASES } from '../../core/config/planetaBlauFamilyWriting.js';
 
 /**
  * Neteja el curs afegit com a segon cognom si s'ha importat des d'Espais
@@ -32,7 +32,7 @@ export const getCleanFirstNameOnly = (rawName) => {
   }
 
   // Elimina articles personals catalans (En, Na, El, La, L', L')
-  clean = clean.replace(/^(en|na|el|la|l'|l’)\s*/i, '');
+  clean = clean.replace(/^(?:(?:en|na|el|la)\s+|l['’]\s*)/i, '');
 
   // Gestió de noms compostos habituals
   const compoundNames = [
@@ -75,16 +75,7 @@ export const cleanDiagnosticTags = (text) => {
 };
 
 /**
- * Generador determinista d'informes per a l'espai Planeta Blau segons
- * l'especificació oficial v1.0.
- *
- * Construeix un informe qualitatiu estricte de 6 paràgrafs:
- * - Paràgraf 1: Introducció comuna completa.
- * - Paràgraf 2: COMPRÈN + INVESTIGA + APLICA (+ observació si n'hi ha).
- * - Paràgraf 3: COMUNICA (+ observació si n'hi ha).
- * - Paràgraf 4: S'ORGANITZA + S'IMPLICA (+ observació si n'hi ha).
- * - Paràgraf 5: S'AUTOAVALUA (+ observació si n'hi ha).
- * - Paràgraf 6: Tancament comú amb el nom de pila ({nom_final}).
+ * Genera el relat per a les famílies a partir dels nivells i matisos del docent.
  */
 export const buildPlanetaBlauReport = (student) => {
   if (!student) return "";
@@ -95,6 +86,7 @@ export const buildPlanetaBlauReport = (student) => {
   const nuances = content.nuances || {};
   const customPhrases = content.customPhrases || {};
   const pbLevels = content.planetaBlauLevels || {};
+  const singleLevels = {};
 
   // El nom a utilitzar a tot l'informe ha de ser ÚNICAMENT el nom de pila, sense cognoms
   const rawFullName = (info.name || "").trim() || "l'alumne/a";
@@ -122,8 +114,7 @@ export const buildPlanetaBlauReport = (student) => {
 
     if (isExplicitSenseEvidencies) {
       const senseText = criterion.senseEvidencies || `Encara no es disposa de prou evidències per valorar aquest àmbit.`;
-      const base = cid === 'comprenc' ? `Valoració de ${fullName}: ${senseText}` : senseText;
-      return appendObservation(base, cid);
+      return appendObservation(senseText, cid);
     }
 
     // 3. Cercar les opcions seleccionades dins dels tags de l'estudiant
@@ -151,38 +142,18 @@ export const buildPlanetaBlauReport = (student) => {
       }
     }
 
-    let baseText = "";
-    if (matchingOptions.length > 0) {
-      // Si el docent ha marcat més d'un nivell (situació de transició), s'inclouen
-      // les frases oficials completes dels nivells seleccionats, en l'ordre de la rúbrica.
-      baseText = matchingOptions.map(opt => cleanDiagnosticTags(opt.trim())).join(' ');
-    } else if (pbLevels[cid] && criterion.optionsByLevel && criterion.optionsByLevel[pbLevels[cid]]) {
-      baseText = cleanDiagnosticTags(criterion.optionsByLevel[pbLevels[cid]]);
-    } else {
-      // 4. Cas quan no hi ha selecció (o sense evidències)
-      const senseEvidencies = criterion.senseEvidencies || `Encara no es disposa de prou evidències per valorar aquest àmbit.`;
-      if (cid === 'comprenc') {
-        baseText = `Valoració de ${fullName}: ${senseEvidencies}`;
-      } else {
-        baseText = senseEvidencies;
-      }
+    const levels = Object.entries(criterion.optionsByLevel || {})
+      .filter(([, option]) => matchingOptions.includes(option))
+      .map(([level]) => level);
+    if (levels.length === 0 && criterion.optionsByLevel?.[pbLevels[cid]]) {
+      levels.push(pbLevels[cid]);
     }
-
-    // Interpolació de variables ({nom}, {nom_final} i pronoms de gènere)
-    const pronounObj = info.gender === 'Masculí' ? 'ajudar-lo' : 'ajudar-la';
-    baseText = baseText
-      .replace(/\{ajudar_pronom\}/g, pronounObj)
-      .replace(/ajudar-la\/lo/g, pronounObj)
-      .replace(/ajudar-lo\/la/g, pronounObj)
-      .replace(/ajudar-\{pronom\}/g, pronounObj)
-      .replace(/\{nom\}/g, fullName)
-      .replace(/\{nom_final\}/g, finalName);
-
-    // Neteja addicional de qualsevol etiqueta diagnòstica residual
-    baseText = cleanDiagnosticTags(baseText);
-
-    // 5. Afegir observació docent puntual si existeix
-    return appendObservation(baseText, cid);
+    if (levels.length === 1) singleLevels[cid] = Number(levels[0]);
+    const phrases = levels.map(level => PLANETA_BLAU_FAMILY_PHRASES[cid][Number(level) - 1]);
+    if (phrases.length > 1) {
+      return appendObservation(`El que hem observat varia segons l’activitat. ${phrases.join(' ')}`, cid);
+    }
+    return appendObservation(phrases[0] || '', cid);
   };
 
   const appendObservation = (text, criterionId) => {
@@ -192,7 +163,8 @@ export const buildPlanetaBlauReport = (student) => {
     if (!nuanceText) return text;
 
     // Assegurar punt final abans d'afegir l'observació
-    const cleanBase = text.endsWith('.') ? text : `${text}.`;
+    if (!text) return nuanceText;
+    const cleanBase = /[.!?]$/.test(text) ? text : `${text}.`;
     return `${cleanBase} ${nuanceText}`;
   };
 
@@ -208,19 +180,19 @@ export const buildPlanetaBlauReport = (student) => {
   const implicoText = getCriterionText(findCriterion('implico'));
   const autoavaluacioText = getCriterionText(findCriterion('autoavaluacio'));
 
-  // Composició estricta de paràgrafs:
-  // Paràgraf 1: Introducció afinada
-  // Paràgraf 2: Aprenentatge científic (Comprèn + Investiga + Aplica)
-  // Paràgraf 3: Comunicació científica (Comunica)
-  // Paràgraf 4: Manera de treballar (Organitza + Implica)
-  // Paràgraf 5: Autoavaluació metacognitiva (neta, sense etiquetes de diagnòstic)
-  // Paràgraf 6: Conclusió blindada comuna adaptada per a tothom
-  const p1 = PLANETA_BLAU_INITIAL_PHRASE.replace(/\{nom_final\}/g, finalName).replace(/\{nom\}/g, fullName).trim();
-  const p2 = [comprencText, investigoText, aplicoText].filter(Boolean).join(' ');
-  const p3 = comunicoText;
-  const p4 = [organitzoText, implicoText].filter(Boolean).join(' ');
-  const p5 = autoavaluacioText;
-  const p6 = PLANETA_BLAU_FINAL_PHRASE.replace(/\{nom_final\}/g, finalName).replace(/\{nom\}/g, fullName).trim();
+  const opening = "Durant els tres reptes de Planeta Blau —la flotació i la densitat, l’electricitat i el canvi climàtic—, ens hem fet preguntes, hem pensat què passaria i hem observat què passava quan posàvem les idees a prova.";
+  const scienceStrength = singleLevels.aplico >= 3 && [singleLevels.investigo, singleLevels.comprenc, singleLevels.comunico].some(level => level <= 2);
+  const science = [
+    scienceStrength ? `Posar idees a prova és un punt fort de ${firstName}. ${aplicoText}` : aplicoText,
+    investigoText,
+    comprencText,
+    comunicoText,
+  ].filter(Boolean).join(' ');
+  const teamwork = [
+    singleLevels.organitzo >= 3 ? `També té cura de com organitza la feina. ${organitzoText}` : organitzoText,
+    implicoText,
+  ].filter(Boolean).join(' ');
+  const closing = `Ha estat un plaer compartir aquest espai amb tu, ${finalName}. Continua fent-te preguntes i provant les teves idees!`;
 
-  return [p1, p2, p3, p4, p5, p6].filter(Boolean).join('\n\n');
+  return [opening, science, teamwork, autoavaluacioText, closing].filter(Boolean).join('\n\n');
 };

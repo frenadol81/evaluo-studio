@@ -18,6 +18,7 @@ import { getRubricsForTrimester } from "./core/config/rubrics/index.js";
 import { parseReadingRows, parseReadingPlainText } from "./infrastructure/services/readingRegisterParser";
 import { generateOpenAiText } from "./infrastructure/api/openAiText";
 import { registerLocalAiSettings } from "./infrastructure/api/localAiSettings";
+import { PLANETA_BLAU_FAMILY_WRITING_RULES } from "./core/config/planetaBlauFamilyWriting.js";
 
 if (existsSync(".env.local")) process.loadEnvFile(".env.local");
 
@@ -547,8 +548,8 @@ INSTRUCCIONS DE REDACCIÓ:
       const prompt = `Actua com un tutor i facilitador expert de l'espai Planeta Blau seguint aquestes instruccions de RIGOR PEDAGÒGIC: 
         
 ${instructions || PLANETA_BLAU_SYSTEM_INSTRUCTION}
-
 ${REPORT_FLOW_GUIDANCE}
+${PLANETA_BLAU_FAMILY_WRITING_RULES}
         
 INSTRUCCIONS DE REDACCIÓ:
 - Menciona TOTS els ítems i matisos d'avaluació: ${planetaBlauTags.join(' | ')}.

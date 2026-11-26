@@ -175,7 +175,6 @@ export const healStudentTags = (tags = [], rubrics = [], studentName = '') => {
   if (!Array.isArray(tags) || tags.length === 0) return [];
   const allRows = rubrics.flatMap(r => r.data || []);
   const healed = [];
-  const handledRowIds = new Set();
 
   for (const tag of tags) {
     // Comprova si és un tag de Sense Evidències
@@ -185,14 +184,15 @@ export const healStudentTags = (tags = [], rubrics = [], studentName = '') => {
     }
 
     let matchedCanonical = null;
-    let matchedRowId = null;
 
-    for (const row of allRows) {
+    // Anteposa les coincidències literals a les aproximades, perquè dos nivells
+    // semblants d'una mateixa fila no quedin reduïts al primer.
+    const exact = allRows.some(row => row.options?.includes(tag));
+    for (const row of exact ? [] : allRows) {
       if (!row.options) continue;
       for (const opt of row.options) {
         if (isOptionSelected([tag], opt, studentName)) {
           matchedCanonical = opt;
-          matchedRowId = row.id;
           break;
         }
       }
@@ -200,11 +200,7 @@ export const healStudentTags = (tags = [], rubrics = [], studentName = '') => {
     }
 
     if (matchedCanonical) {
-      // Evitem duplicats de la mateixa fila en la curació
-      if (!handledRowIds.has(matchedRowId)) {
-        healed.push(matchedCanonical);
-        handledRowIds.add(matchedRowId);
-      }
+      healed.push(matchedCanonical);
     } else {
       // Tags lliures, personalitat o manuals es conserven
       healed.push(tag);

@@ -153,6 +153,7 @@ export const ReportResult: React.FC<ReportResultProps> = ({ report: initialRepor
     const previous = history[0];
     setRedoStack(prev => [fullReport, ...prev]);
     setHistory(prev => prev.slice(1));
+    clearTimeout(manualTypingTimeoutRef.current);
     setFullReport(previous);
     if (onReportChange) onReportChange(previous);
   };
@@ -162,6 +163,7 @@ export const ReportResult: React.FC<ReportResultProps> = ({ report: initialRepor
     const next = redoStack[0];
     setHistory(prev => [fullReport, ...prev]);
     setRedoStack(prev => prev.slice(1));
+    clearTimeout(manualTypingTimeoutRef.current);
     setFullReport(next);
     if (onReportChange) onReportChange(next);
   };

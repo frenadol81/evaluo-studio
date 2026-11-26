@@ -23,6 +23,8 @@ export function reportFingerprint(student, configUI, trimester) {
     nuances: content.nuances || {},
     maker: content.maker || {},
     planetaBlau: content.planetaBlau || {},
+    planetaBlauLevels: content.planetaBlauLevels,
+    customPhrases: content.customPhrases,
     anecdote: content.anecdote || "",
     selfAssessment: content.selfAssessment || "",
     recommendations: content.recommendations || [],

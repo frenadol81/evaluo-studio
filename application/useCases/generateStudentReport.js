@@ -40,8 +40,7 @@ export const executeGenerateReport = async (student, configUI, trimester = 2) =>
     const isPureMaker = promptText.includes("### ROL: FACILITADOR/A DE L'ESPAI MAKER (STEAM) - ESPECIALISTA");
     const isPurePlanetaBlau = promptText.includes("### ROL: FACILITADOR/A DE L'ESPAI PLANETA BLAU - ESPECIALISTA");
     
-    // Per a l'especialista de Planeta Blau pur, l'especificació oficial v1.0 estableix
-    // una generació determinista estricta recuperant directament les frases de la rúbrica
+    // Planeta Blau genera el relat per a les famílies localment.
     let generatedText = "";
     if (isPurePlanetaBlau) {
       generatedText = buildPlanetaBlauReport(student);

@@ -1,3 +1,5 @@
+import { comunicacioNivell2 } from '../planetaBlauFamilyWriting.js';
+
 export const RUBRIC_PLANETA_BLAU = {
   id: 'ambit_planeta_blau',
   title: 'Àmbit Planeta Blau',
@@ -84,6 +86,7 @@ export const RUBRIC_PLANETA_BLAU = {
     },
     {
       id: 'comunico',
+      displayOptionsByLevel: { '2': comunicacioNivell2 },
       order: 4,
       block: 'aprenentatge_cientific',
       label: 'COMUNICA',

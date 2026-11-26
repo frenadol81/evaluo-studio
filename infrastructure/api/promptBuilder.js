@@ -12,6 +12,7 @@ import { isOptionSelected } from '../../core/utils/rubricMatcher.js';
 import { getQualitativeReadingDescription } from '../../core/logic/decatypeCalc.js';
 import { GENERAL_REPORT_WRITING_RULES, MATH_REPORT_WRITING_RULES } from '../../core/config/reportWritingRules.js';
 import { MAKER_SYSTEM_INSTRUCTION, PLANETA_BLAU_SYSTEM_INSTRUCTION, PLANETA_BLAU_INITIAL_PHRASE, PLANETA_BLAU_FINAL_PHRASE } from '../../constants';
+import { PLANETA_BLAU_FAMILY_WRITING_RULES } from '../../core/config/planetaBlauFamilyWriting.js';
 
 /**
  * Minimitza el nom de l'alumne per reduir PII enviat a tercers (Gemini).
@@ -403,6 +404,7 @@ Integra aquestes evidències d'evolució al llarg del redactat.
 
 ### FILOSOFIA:
 ${PLANETA_BLAU_SYSTEM_INSTRUCTION}
+${PLANETA_BLAU_FAMILY_WRITING_RULES}
 
 ### DADES D'AVALUACIÓ PLANETA BLAU:
 - Etiquetes seleccionades i matisos: ${planetaBlauTags.join(' | ')}
@@ -529,7 +531,7 @@ ${hasMakerData ? `
 ${hasPlanetaBlauData ? `
 5. SECCIÓ ESPAI PLANETA BLAU (BLOC SEPARAT CONSECUTIU DESPRÉS DE MAKER):
    ### FILOSOFIA I REGLES PLANETA BLAU (TOTALITAT I CLARETAT):
-   ${PLANETA_BLAU_SYSTEM_INSTRUCTION}
+   ${PLANETA_BLAU_FAMILY_WRITING_RULES}
    
    DADES D'AVALUACIÓ PLANETA BLAU:
    - ${planetaBlauTags.join(' | ')}
@@ -537,11 +539,10 @@ ${hasPlanetaBlauData ? `
    
    INSTRUCCIONS DE REDACCIÓ PER A PLANETA BLAU:
    - Situa aquesta secció com un bloc independent separat consecutiu just després de Maker (o al final de l'informe si l'alumne no té Maker).
-   - Comença aquest bloc OBLIGATÒRIAMENT amb la FRASE INICIAL institucional exacta:
-   "${PLANETA_BLAU_INITIAL_PHRASE.replace('{nom_final}', studentFirstName)}"
-   - Integra TOTS els ítems i matisos avaluats (inclosa l'autoavaluació en la dinàmica de treball).
-   - Conclou aquest bloc OBLIGATÒRIAMENT amb la FRASE FINAL de cloenda blindada (és la conclusió definitiva que tanca Planeta Blau; res no pot anar després):
-   "${PLANETA_BLAU_FINAL_PHRASE.replace('{nom_final}', studentFirstName)}"
+   - Situa els reptes estudiats i descriu la participació individual d'acord amb les evidències.
+   - Integra tots els aprenentatges valorats i els matisos docents en el relat.
+   - Tanca amb aquesta frase de comiat:
+   "Ha estat un plaer compartir aquest espai amb tu, ${studentFirstName}. Continua fent-te preguntes i provant les teves idees!"
 ` : ""}
 
 ### DADES DE L'ALUMNE:

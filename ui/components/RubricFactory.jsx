@@ -146,7 +146,7 @@ export const RubricFactory = ({ section, studentData, onUpdate, density = 'balan
                         )}
                       </div>
                       {selectedRowOptions.map((opt, i) => (
-                        <p key={i} className="text-[11px] text-slate-500 font-semibold italic line-clamp-1 transition-all">"{opt.replace(/\{nom\}/g, displayName)}"</p>
+                        <p key={i} className="text-[11px] text-slate-500 font-semibold italic line-clamp-1 transition-all">"{(row.displayOptionsByLevel?.[levels[row.options.indexOf(opt)]?.label] || opt).replace(/\{nom\}/g, displayName)}"</p>
                       ))}
                       {isSenseEvidenciesSelected && (
                         <p className="text-[11px] text-slate-400 font-semibold italic line-clamp-1 transition-all">"{row.senseEvidencies}"</p>
@@ -160,7 +160,7 @@ export const RubricFactory = ({ section, studentData, onUpdate, density = 'balan
                           const optionText = row.options ? row.options[idx] : null;
                           if (!optionText) return null;
                           const isSelected = isOptionSelected(currentTags, optionText, displayName);
-                          const renderedOption = optionText.replace(/\{nom\}/g, displayName);
+                          const renderedOption = (row.displayOptionsByLevel?.[lvl.label] || optionText).replace(/\{nom\}/g, displayName);
                           
                           return (
                             <div key={idx} className="relative group/btn">

@@ -2,6 +2,7 @@
 import Dexie, { type Table } from 'dexie';
 import type { PhotoCrop } from '../../types';
 import type { SupportRole } from '../services/classroomGrouping';
+import type { DojoSummary } from '../services/classDojoSummary';
 
 export interface Student {
   id: string;
@@ -74,6 +75,7 @@ export class EvaluoDB extends Dexie {
   students!: Table<Student, string | number>;
   classes!: Table<Class>;
   classroomEvidence!: Table<ClassroomEvidence, string>;
+  dojoSummaries!: Table<DojoSummary, string>;
 
   constructor() {
     super('EvaluoDB');
@@ -82,6 +84,7 @@ export class EvaluoDB extends Dexie {
       students: 'id, groupId, info.name, state.status'
     });
     this.version(2).stores({ classroomEvidence: 'id, pupilId, groupId' });
+    this.version(3).stores({ dojoSummaries: 'id, pupilId, groupId' });
   }
 }
 

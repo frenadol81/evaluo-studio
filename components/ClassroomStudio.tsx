@@ -519,7 +519,7 @@ export function ClassroomStudio({ students, groups, activeGroupId, trimester, pe
                 className="min-h-10 rounded-lg border border-warm-200 bg-white px-3 py-2 text-sm font-semibold aria-pressed:bg-primary-900 aria-pressed:text-white"
                 onClick={() => { setDeskMode(mode); setPickedPupil(''); setDeskSettings(''); setMessage(''); }}>{label}</button>
             )}
-            {evaluating && <div key={groupId}><ClassroomEvidence groupId={groupId}
+            {evaluating && <div key={groupId}><ClassroomEvidence groupId={groupId} groupName={groups.find(group => group.id === groupId)?.name || groupId}
               pupils={pupils.map(student => ({ ...student.info, id: identities.get(String(student.id)) || String(student.id) }))}
               pupil={byId.has(evidencePupilId) ? { ...byId.get(evidencePupilId)!.info,
                 id: identities.get(evidencePupilId) || evidencePupilId } : undefined}
