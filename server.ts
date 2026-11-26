@@ -16,6 +16,11 @@ import { SYSTEM_INSTRUCTION, MAKER_SYSTEM_INSTRUCTION, PLANETA_BLAU_SYSTEM_INSTR
 import { getRubricsForTrimester } from "./core/config/rubrics/index.js";
 import { parseReadingRows, parseReadingPlainText } from "./infrastructure/services/readingRegisterParser";
 
+const REPORT_FLOW_GUIDANCE = `PAUTA DE FLUÏDESA NARRATIVA
+- Quan coincideixin una fortalesa i una necessitat de suport, concreta en quines accions es manifesta cadascuna. Per exemple, si les dades ho indiquen, distingeix entre l'autonomia per seguir les fases o fer les tasques del rol i l'acompanyament per implicar-se, mantenir l'esforç o col·laborar amb els companys.
+- Enllaça les frases recuperant una idea de l'anterior o situant l'acció en el seu context. Fes servir connectors quan aclareixin la relació entre idees i reparteix les enumeracions llargues en frases que agrupin accions relacionades.
+- Conserva els matisos d'avaluació, inclosa la freqüència del suport. Descriu conductes observables i evita atribuir motivacions o donar per fet que hi ha hagut una millora si les dades no ho indiquen.`;
+
 async function startServer() {
   const app = express();
   const server = createServer(app);
@@ -268,7 +273,7 @@ async function startServer() {
 
       const result = await generateWithResilience({
         prompt,
-        systemInstruction: systemInstructionToUse,
+        systemInstruction: `${systemInstructionToUse}\n\n${REPORT_FLOW_GUIDANCE}`,
         primaryModel: 'gemini-3.8-flash',
       });
 
@@ -528,6 +533,8 @@ INSTRUCCIONS DE REDACCIÓ:
       const prompt = `Actua com un tutor i facilitador expert de l'espai Planeta Blau seguint aquestes instruccions de RIGOR PEDAGÒGIC: 
         
 ${instructions || PLANETA_BLAU_SYSTEM_INSTRUCTION}
+
+${REPORT_FLOW_GUIDANCE}
         
 INSTRUCCIONS DE REDACCIÓ:
 - Menciona TOTS els ítems i matisos d'avaluació: ${planetaBlauTags.join(' | ')}.
