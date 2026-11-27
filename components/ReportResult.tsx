@@ -3,6 +3,7 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Printer, Wand2, Sparkles, Save, ArrowLeft, Feather, Zap, Loader2, Heart, Copy, Check, ShieldCheck, Library, AlertTriangle, Info, Globe, RotateCcw, RefreshCw, Wind, Undo, Redo, FileText, Trash2, LineChart, History, Plus, X } from 'lucide-react';
 import { getTextVariations, getEvolutionSuggestions, injectEvolutionPhrase } from '../services/geminiService';
 import { getLocalReportAlternatives, type ReportEditMode } from '../core/config/reportEditingAlternatives';
+import { normalizeReportVocabulary } from '../core/utils/reportVocabulary.js';
 import ReactMarkdown from 'react-markdown';
 
 interface ReportResultProps {
@@ -17,7 +18,7 @@ interface ReportResultProps {
 }
 
 export const ReportResult: React.FC<ReportResultProps> = ({ report: initialReport, studentName, language, student, trimester, onReset, onReportChange, onUpdateContent }) => {
-  const ensureBreath = (text: string) => text.trim() + "\n\n";
+  const ensureBreath = (text: string) => normalizeReportVocabulary(text).trim() + "\n\n";
 
   // Funció per processar les etiquetes de resaltat en el text de l'informe
   const processHighlights = (text: string) => {

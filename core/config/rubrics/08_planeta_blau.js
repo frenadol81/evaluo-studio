@@ -1,4 +1,4 @@
-import { comunicacioNivell2 } from '../planetaBlauFamilyWriting.js';
+import { autoavaluacioPerNivell, comunicacioNivell2, implicacioPerNivell, organitzacioNivell2 } from '../planetaBlauFamilyWriting.js';
 
 export const RUBRIC_PLANETA_BLAU = {
   id: 'ambit_planeta_blau',
@@ -109,6 +109,7 @@ export const RUBRIC_PLANETA_BLAU = {
     },
     {
       id: 'organitzo',
+      displayOptionsByLevel: { '2': organitzacioNivell2 },
       order: 5,
       block: 'manera_de_treballar',
       label: 'S’ORGANITZA',
@@ -131,6 +132,7 @@ export const RUBRIC_PLANETA_BLAU = {
     },
     {
       id: 'implico',
+      displayOptionsByLevel: Object.fromEntries(implicacioPerNivell.map((frase, index) => [index + 1, frase])),
       order: 6,
       block: 'manera_de_treballar',
       label: 'S’IMPLICA',
@@ -153,6 +155,7 @@ export const RUBRIC_PLANETA_BLAU = {
     },
     {
       id: 'autoavaluacio',
+      displayOptionsByLevel: Object.fromEntries(autoavaluacioPerNivell.map((frase, index) => [index + 1, frase])),
       order: 7,
       block: 'manera_de_treballar',
       label: 'S’AUTOAVALUA',

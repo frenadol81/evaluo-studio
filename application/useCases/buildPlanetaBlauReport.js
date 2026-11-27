@@ -1,5 +1,6 @@
 import { RUBRIC_PLANETA_BLAU } from '../../core/config/rubrics/08_planeta_blau.js';
 import { PLANETA_BLAU_FAMILY_PHRASES } from '../../core/config/planetaBlauFamilyWriting.js';
+import { normalizeReportVocabulary } from '../../core/utils/reportVocabulary.js';
 
 /**
  * Neteja el curs afegit com a segon cognom si s'ha importat des d'Espais
@@ -143,7 +144,7 @@ export const buildPlanetaBlauReport = (student) => {
     }
 
     const levels = Object.entries(criterion.optionsByLevel || {})
-      .filter(([, option]) => matchingOptions.includes(option))
+      .filter(([level, option]) => matchingOptions.includes(option) || matchingOptions.includes(rowOptions[Number(level) - 1]))
       .map(([level]) => level);
     if (levels.length === 0 && criterion.optionsByLevel?.[pbLevels[cid]]) {
       levels.push(pbLevels[cid]);
@@ -180,19 +181,42 @@ export const buildPlanetaBlauReport = (student) => {
   const implicoText = getCriterionText(findCriterion('implico'));
   const autoavaluacioText = getCriterionText(findCriterion('autoavaluacio'));
 
-  const opening = "Durant els tres reptes de Planeta Blau —la flotació i la densitat, l’electricitat i el canvi climàtic—, ens hem fet preguntes, hem pensat què passaria i hem observat què passava quan posàvem les idees a prova.";
-  const scienceStrength = singleLevels.aplico >= 3 && [singleLevels.investigo, singleLevels.comprenc, singleLevels.comunico].some(level => level <= 2);
+  const openingContext = "Durant els tres reptes de Planeta Blau —la flotació i la densitat, l’electricitat i el canvi climàtic—,";
+  const recordsResults = singleLevels.investigo >= 2;
+  const opening = recordsResults
+    ? `${openingContext} ${firstName} ha anotat què observava i quins resultats obtenia a les proves.`
+    : `${openingContext} hem observat què passava quan posàvem les idees a prova.`;
+
+  // Les descripcions que comparteixen una mateixa acció es redacten juntes.
+  // Els criteris amb una frase del docent o més d'un nivell mantenen el text propi.
+  const linksResultsToIdeasWithHelp = singleLevels.investigo === 2 && singleLevels.comprenc === 2;
+  let investigation = investigoText;
+  if (linksResultsToIdeasWithHelp) {
+    investigation = appendObservation(appendObservation(
+      "A partir del que ha anotat, l’acompanyem a comparar els resultats amb el que pensava al principi i a treure’n conclusions senzilles. Això l’ajuda a donar sentit al que ha observat i a explicar amb les idees de ciències què ha passat i per què.",
+      'investigo',
+    ), 'comprenc');
+  } else if (recordsResults) {
+    const followUp = {
+      2: "A partir del que ha anotat, l’ajudem a comparar-ho amb el que pensava al principi i a treure’n conclusions senzilles.",
+      3: "Quan comprova si s’ha complert el que esperava, compara els resultats pel seu compte i explica quines proves donen suport a les seves conclusions.",
+      4: "Interpreta pel seu compte allò que ha anotat i ho compara amb el que esperava. Sap explicar què ens mostren les proves i què encara cal comprovar.",
+    };
+    investigation = appendObservation(followUp[singleLevels.investigo], 'investigo');
+  }
+
+  const application = singleLevels.aplico === 3 ? appendObservation(
+    "Davant d’un repte, sap fer servir el que hem après per proposar una solució, provar-la i millorar-la pel seu compte a partir del que veu.",
+    'aplico',
+  ) : aplicoText;
   const science = [
-    scienceStrength ? `Posar idees a prova és un punt fort de ${firstName}. ${aplicoText}` : aplicoText,
-    investigoText,
-    comprencText,
+    ...(singleLevels.aplico >= 3 ? [application, investigation] : [investigation, application]),
+    linksResultsToIdeasWithHelp ? '' : comprencText,
     comunicoText,
   ].filter(Boolean).join(' ');
-  const teamwork = [
-    singleLevels.organitzo >= 3 ? `També té cura de com organitza la feina. ${organitzoText}` : organitzoText,
-    implicoText,
-  ].filter(Boolean).join(' ');
+
+  const teamwork = [organitzoText, implicoText].filter(Boolean).join(' ');
   const closing = `Ha estat un plaer compartir aquest espai amb tu, ${finalName}. Continua fent-te preguntes i provant les teves idees!`;
 
-  return [opening, science, teamwork, autoavaluacioText, closing].filter(Boolean).join('\n\n');
+  return normalizeReportVocabulary([opening, science, teamwork, autoavaluacioText, closing].filter(Boolean).join('\n\n'));
 };

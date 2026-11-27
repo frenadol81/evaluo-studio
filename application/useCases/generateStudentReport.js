@@ -6,6 +6,7 @@ import { callGeminiAPI } from '../../infrastructure/api/geminiClient.js';
 import { MAKER_SYSTEM_INSTRUCTION, SYSTEM_INSTRUCTION, PLANETA_BLAU_SYSTEM_INSTRUCTION } from '../../constants';
 import { getRubricsForTrimester } from '../../core/config/rubrics/index.js';
 import { buildPlanetaBlauReport } from './buildPlanetaBlauReport.js';
+import { normalizeReportVocabulary } from '../../core/utils/reportVocabulary.js';
 
 /**
  * Cas d'ús: Generar Informe d'Alumne
@@ -28,7 +29,7 @@ export const executeGenerateReport = async (student, configUI, trimester = 2) =>
     // Si ja existeix un informe i la huella coincideix, retornem el que ja tenim (tret que es forci la regeneració)
     if (!configUI?.forceRegenerate && student.state?.generatedReport && student.state?.reportFingerprint === currentFingerprint) {
       console.log("♻️ Reutilitzant informe existent per huella idèntica.");
-      return { text: student.state.generatedReport, fingerprint: currentFingerprint, reused: true };
+      return { text: normalizeReportVocabulary(student.state.generatedReport), fingerprint: currentFingerprint, reused: true };
     }
     // ---------------------------------
 
@@ -63,7 +64,7 @@ export const executeGenerateReport = async (student, configUI, trimester = 2) =>
       generatedText = `${generatedText.trim()}\n\n${piClause}`;
     }
 
-    return { text: generatedText, fingerprint: currentFingerprint, reused: false };
+    return { text: normalizeReportVocabulary(generatedText), fingerprint: currentFingerprint, reused: false };
 
   } catch (error) {
     console.error("Error en el cas d'ús GenerateStudentReport:", error);

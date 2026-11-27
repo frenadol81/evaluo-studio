@@ -1,6 +1,7 @@
 import type { Table } from 'dexie';
 import { db, type SessionDocument } from './db';
 import { withSharedStudentPhotos } from '../services/studentMemberships';
+import { normalizeSavedReportVocabulary } from '../../core/utils/reportVocabulary.js';
 
 const extraTables = ['classes', 'classroomEvidence', 'dojoSummaries', 'sessionDocuments'] as const;
 type ExtraTable = typeof extraTables[number];
@@ -84,7 +85,7 @@ export async function exportSession(groups: { id: string; name: string }[]) {
   }));
   return {
     ...snapshot,
-    students,
+    students: students.map(normalizeSavedReportVocabulary),
     unavailablePhotos: students.filter(student => student.info.photoUrl?.startsWith('blob:')).length,
   };
 }

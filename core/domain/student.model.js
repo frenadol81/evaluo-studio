@@ -1,5 +1,6 @@
 
 import { predictGender } from '../../constants';
+import { normalizeSavedReportVocabulary } from '../utils/reportVocabulary.js';
 
 /**
  * Factory function para crear una entidad de Estudiante.
@@ -160,7 +161,7 @@ export const createStudent = (raw = {}, trimesterId = 2) => {
 
   trimesters[trimesterId] = trimesterData;
 
-  return Object.freeze({
+  return Object.freeze(normalizeSavedReportVocabulary({
     id,
     groupId: info.groupId, 
     info,
@@ -169,5 +170,5 @@ export const createStudent = (raw = {}, trimesterId = 2) => {
     // Projeccions (NO es guarden com a font de veritat si l'app és neta, però es fan servir per compatibilitat)
     content: trimesterData.content,
     state: trimesterData.state
-  });
+  }));
 };

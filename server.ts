@@ -19,6 +19,7 @@ import { parseReadingRows, parseReadingPlainText } from "./infrastructure/servic
 import { generateOpenAiText } from "./infrastructure/api/openAiText";
 import { registerLocalAiSettings } from "./infrastructure/api/localAiSettings";
 import { PLANETA_BLAU_FAMILY_WRITING_RULES } from "./core/config/planetaBlauFamilyWriting.js";
+import { normalizeReportVocabulary } from "./core/utils/reportVocabulary.js";
 
 if (existsSync(".env.local")) process.loadEnvFile(".env.local");
 
@@ -265,7 +266,7 @@ async function startServer() {
         primaryModel: model,
       });
 
-      res.json({ text: result });
+      res.json({ text: normalizeReportVocabulary(result) });
     } catch (error: any) {
       sendError(res, error, "/api/gemini/generate");
     }
@@ -292,7 +293,7 @@ async function startServer() {
         primaryModel: 'gemini-3.8-flash',
       });
 
-      res.json({ text: result.trim() + "\n" });
+      res.json({ text: normalizeReportVocabulary(result).trim() + "\n" });
     } catch (error: any) {
       sendError(res, error, "/api/gemini/generate-report");
     }
@@ -465,7 +466,7 @@ TASCA: Integra la frase d'evolució de manera natural i elegant dins de l'inform
         primaryModel: 'gemini-3.8-flash',
       });
 
-      res.json({ text: result || reportText });
+      res.json({ text: normalizeReportVocabulary(result || reportText) });
     } catch (error: any) {
       sendError(res, error, "/api/gemini/inject-evolution");
     }
@@ -578,7 +579,7 @@ INSTRUCCIONS DE REDACCIÓ:
         }
       }
 
-      res.json({ narrative });
+      res.json({ narrative: normalizeReportVocabulary(narrative) });
     } catch (error: any) {
       sendError(res, error, "/api/gemini/generate-planeta-blau-narrative");
     }
